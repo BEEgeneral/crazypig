@@ -1,10 +1,11 @@
 import './fonts.css';import './style.css';import './tournament.css';import './race.css';import './natural.css';
-import { Game, DemoFeed, CATALOG, parseWallet, purchase, collect, type Item, type Wallet, type Quote } from './game';
+import { Game, DemoFeed, StoryFeed, CATALOG, parseWallet, purchase, collect, type Item, type Wallet, type Quote } from './game';
 import {ValleyScene} from './scene';import {icon} from './icons';
-import {VillageRun, type VillageSide} from './village-run';
+import {VillageRun} from './village-run';
 import {HorusDemo, type IndicatorSnapshot} from './horus';
-import {stageChip, directionLabel, LEXICON} from './lexicon';
+import {stageChip, LEXICON, stageLabel} from './lexicon';
 import {PriceTerrain,priceToGround} from './price-terrain';
+import {playerToast} from './stage-track';
 
 const app=document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML=`
@@ -20,7 +21,7 @@ app.innerHTML=`
   <button class="avatar" data-action="help" aria-label="Guía del valle">A<span></span></button>
  </header>
  <main class="playground" id="main">
-  <section class="intro"><div class="eyebrow">EL CAMINO ENTRE DOS VILLAS</div><h1>Cada huella<br><i>cuenta una historia.</i></h1><p>El precio traza el camino. Tu villa espera a que empiece el recorrido.</p></section>
+  <section class="intro"><div class="eyebrow">TORNEO DEL VALLE</div><h1>El cerdo<br><i>abre el camino.</i></h1><p>Corre, ofrece, y deja que el jabalí rompa puertas. El tesoro oficial sigue en el castillo.</p></section>
   <div class="scene-wrap" id="scene"><div class="loading" id="loading"><img src="/favicon.svg" alt=""/><span>Despertando al valle…</span><div><i></i></div></div></div>
   <div class="mode-chip"><span></span><span id="mode-label">Modo demostración</span><button data-action="help" aria-label="Información del modo demostración">${icon('help',14)}</button></div>
   <div class="village-label label-blue"><div class="portrait-frame"><img src="/portraits/edrick.jpeg" alt="Sir Edrick, señor de Villa Roble"/></div><span>VILLA ROBLE</span><strong>Sir Edrick</strong><small>Honor, valor y raíces.</small></div><div class="village-label label-red"><div class="portrait-frame"><img src="/portraits/alaric.jpeg" alt="Lord Alaric, señor de Villa Brasa"/></div><span>VILLA BRASA</span><strong>Lord Alaric</strong><small>Que arda la rivalidad.</small></div>
@@ -29,18 +30,19 @@ app.innerHTML=`
   <section id="runner-panel" class="runner-panel" hidden aria-label="Minijuego de las villas">
    <div class="village-score score-roble"><button data-side="-1" aria-pressed="true">VILLA ROBLE <span id="roble-active">TU VILLA</span></button><strong id="pile-roble">0</strong><small>ofrecido junto a la valla</small></div>
    <div class="village-score score-brasa"><button data-side="1" aria-pressed="false">VILLA BRASA <span id="brasa-active">CAMBIAR</span></button><strong id="pile-brasa">0</strong><small>ofrecido junto a la valla</small></div>
-   <div class="runner-tip"><b>AVANCE = TIEMPO · LATERALES = PRECIO</b><span>Muévete con las flechas. Recoge. Acércate a la valla.</span></div>
+   <div class="runner-tip"><b>RECOGE · LLEVA A LA VALLA · OFRECE</b><span>Flechas o WASD. El cerdo abre las puertas del valle.</span></div>
    <div class="backpack"><span>TU MOCHILA</span><strong>${icon('coin',19)} <b id="pocket-coins">0</b><span class="gem-icon">◆</span> <b id="pocket-gems">0</b></strong><small>1 joya = 5 monedas de villa</small></div>
    <div class="runner-feedback" id="runner-feedback" role="status" aria-live="polite">Recoge recursos y llévalos a la valla.</div>
    <div class="runner-pad" role="group" aria-label="Mover al aldeano"><button data-move="up" aria-label="Mover hacia delante">↑</button><button data-move="left" aria-label="Mover a la izquierda">←</button><span> TÚ </span><button data-move="right" aria-label="Mover a la derecha">→</button><button data-move="down" aria-label="Mover hacia atrás">↓</button></div>
    <div class="offer-area"><button class="primary" id="offer" disabled>Ofrecer a la villa <span id="offer-value">0</span></button><small id="offer-hint">Recoge monedas o joyas primero.</small><span>Solo recursos de villa · efecto visual</span></div>
   </section>
-  <section id="indicator-panel" class="indicator-panel" hidden aria-label="Estado visual del indicador Horus Apex">
-   <div class="indicator-head"><span><b>MAPA DEL RECORRIDO</b><small>PRECIOS SIMULADOS · SIN OPERACIONES</small></span><strong id="signal-stage">RANGO</strong></div>
-   <svg id="price-chart" viewBox="0 0 240 74" role="img" aria-label="Gráfica del precio MNQ"><rect id="chart-range" x="0" y="22" width="240" height="30"/><polyline id="chart-line" points="0,38 240,38"/><line id="chart-entry" x1="0" y1="38" x2="240" y2="38"/><line id="chart-stop" x1="0" y1="58" x2="240" y2="58"/><line id="chart-target" x1="0" y1="18" x2="240" y2="18"/></svg>
-   <div class="indicator-metrics"><span>RANGO <b id="range-value">—</b></span><span>SEÑAL <b id="signal-value">ESPERA</b></span><span>SL / TP <b id="levels-value">— / —</b></span></div>
+  <section id="indicator-panel" class="indicator-panel quest-panel" hidden aria-label="Quest del valle">
+   <div class="indicator-head"><span><b>QUEST DEL VALLE</b><small>ENSAYO · SIN TESORO</small></span><strong id="signal-stage">NIEBLA</strong></div>
+   <svg id="price-chart" viewBox="0 0 240 74" role="img" aria-label="Camino del cerdo"><rect id="chart-range" x="0" y="22" width="240" height="30"/><polyline id="chart-line" points="0,38 240,38"/><line id="chart-entry" x1="0" y1="38" x2="240" y2="38"/><line id="chart-stop" x1="0" y1="58" x2="240" y2="58"/><line id="chart-target" x1="0" y1="18" x2="240" y2="18"/></svg>
+   <div class="indicator-metrics"><span>NIEBLA <b id="range-value">—</b></span><span>QUEST <b id="signal-value">En espera</b></span><span>DESTINO <b id="levels-value">—</b></span></div>
   </section>
-  <div class="terrain-legend" id="terrain-legend" hidden><span>← PRECIO MAYOR · ROBLE</span><b id="terrain-state">Preparando el rango</b><span>BRASA · PRECIO MENOR →</span></div>
+  <div class="terrain-legend" id="terrain-legend" hidden><span>← VILLA ROBLE</span><b id="terrain-state">Niebla de la mañana</b><span>VILLA BRASA →</span></div>
+  <div id="quest-flash" class="quest-flash" hidden><b id="quest-flash-chip">NIEBLA</b><span id="quest-flash-copy">Niebla de la mañana</span></div>
   <section class="race-result" id="race-result" hidden role="status"><small>RESULTADO DEL ENSAYO</small><strong id="result-title"></strong><p id="result-detail"></p><button class="primary" data-action="save-result">Guardar y volver al valle</button></section>
   <section class="game-dock" aria-label="Controles de la partida">
    <div class="dock-heading"><div><span class="section-kicker" id="dock-kicker">TU AVENTURA EMPIEZA AQUÍ</span><h2 id="dock-title">¿Cuántas bolsas llevas?</h2></div><span class="step-chip" id="step-chip">01 <span>/</span> ELIGE TU EQUIPAJE</span></div>
@@ -55,7 +57,7 @@ app.innerHTML=`
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 `;
 const $=<T extends HTMLElement=HTMLElement>(s:string)=>document.querySelector<T>(s)!;
-const game=new Game(),feed=new DemoFeed(),villageRun=new VillageRun(),horus=new HorusDemo(),terrain=new PriceTerrain();let wallet:Wallet;let walletReady=true;
+const game=new Game(),storyMode=new URLSearchParams(location.search).has('story'),feed=storyMode?new StoryFeed():new DemoFeed(),villageRun=new VillageRun(),horus=new HorusDemo(),terrain=new PriceTerrain();let wallet:Wallet;let walletReady=true;
 const heldKeys=new Set<string>(),heldPointers=new Map<number,string>();
 function clearMovement(){heldKeys.clear();heldPointers.clear();document.querySelectorAll('[data-move]').forEach(b=>b.classList.remove('held'));}
 function movement(){const directions=new Set([...heldKeys,...heldPointers.values()]);return{horizontal:Number(directions.has('right'))-Number(directions.has('left')),forward:Number(directions.has('up'))-Number(directions.has('down'))};}
@@ -67,7 +69,19 @@ let lastFrame=performance.now(),lastUI=0,raf=0,acornID:string|null=null,nextAcor
 function uniqueID(){return crypto.randomUUID?.()??Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');}
 const sessionID=uniqueID(),dialog=$<HTMLDialogElement>('#dialog');let panel='';
 let toastTimer:ReturnType<typeof setTimeout>;
-function toast(message:string){$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),4200);}
+function toast(message:string,kind:'plain'|'quest'='plain'){
+ $('#toast').textContent=message;$('#toast').classList.add('visible');
+ $('#toast').classList.toggle('quest',kind==='quest');
+ $('#main').classList.remove('juice-shake');void $('#main').offsetWidth;$('#main').classList.add('juice-shake');
+ clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('#toast').classList.remove('visible','quest');$('#main').classList.remove('juice-shake');},kind==='quest'?2600:4200);
+}
+function flashQuest(stage:IndicatorSnapshot['stage'],direction:-1|0|1){
+ const flash=$('#quest-flash');flash.hidden=false;
+ $('#quest-flash-chip').textContent=stageChip(stage);
+ $('#quest-flash-copy').textContent=playerToast(stage,direction);
+ flash.classList.remove('show');void flash.offsetWidth;flash.classList.add('show');
+ toast(playerToast(stage,direction),'quest');
+}
 function updateCoins(){$('#coins').textContent=wallet.coins.toLocaleString('es-ES');}
 updateCoins();
 function save(next:Wallet){
@@ -107,12 +121,12 @@ function renderRunner(){
  const feedback=villageRun.elapsed<villageRun.feedbackUntil?villageRun.feedback:'La flecha dorada señala a tu aldeano.';
  if($('#runner-feedback').textContent!==feedback)$('#runner-feedback').textContent=feedback;
  document.querySelectorAll<HTMLButtonElement>('[data-side]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.side)===villageRun.side)));
- $('#roble-active').textContent=villageRun.activeSide===-1?`TU VILLA · ${LEXICON.long}`:villageRun.activeSide?'ALDEANOS':LEXICON.wait;$('#brasa-active').textContent=villageRun.activeSide===1?`TU VILLA · ${LEXICON.short}`:villageRun.activeSide?'ALDEANOS':LEXICON.wait;document.querySelectorAll<HTMLButtonElement>('[data-side]').forEach(b=>b.disabled=true);
+ $('#roble-active').textContent=villageRun.activeSide===-1?`TU VILLA · ${LEXICON.long}`:villageRun.activeSide?LEXICON.wait:LEXICON.wait;$('#brasa-active').textContent=villageRun.activeSide===1?`TU VILLA · ${LEXICON.short}`:villageRun.activeSide?LEXICON.wait:LEXICON.wait;document.querySelectorAll<HTMLButtonElement>('[data-side]').forEach(b=>b.disabled=true);
 }
-function fmtPrice(n:number){return n>0?n.toFixed(2):'—';}
 function renderIndicator(snapshot:IndicatorSnapshot){
  const stage=$('#signal-stage');stage.textContent=stageChip(snapshot.stage);
- stage.className=`stage-${snapshot.stage}`;$('#signal-value').textContent=directionLabel(snapshot.direction);$('#range-value').textContent=snapshot.rangeHigh>0?`${fmtPrice(snapshot.rangeWidth)} pt`:'—';$('#levels-value').textContent=snapshot.entry?`${fmtPrice(snapshot.stop)} / ${fmtPrice(snapshot.target)}`:'— / —';
+ stage.className=`stage-${snapshot.stage}`;$('#signal-value').textContent=stageLabel(snapshot.stage);$('#range-value').textContent=snapshot.stage==='range'?LEXICON.range:snapshot.stage==='sweep'?LEXICON.sweep:'—';
+ $('#levels-value').textContent=snapshot.stage==='tp'?LEXICON.tp:snapshot.stage==='sl'?LEXICON.sl:snapshot.stage==='long'||snapshot.stage==='short'?LEXICON.entry:snapshot.stage==='retest'?LEXICON.structure:'—';
  const f=terrain.frame,y=(price:number)=>37+priceToGround(price,f)/f.width*60;
  const line=document.querySelector<SVGPolylineElement>('#chart-line')!;
  const values=game.history.slice(-100).map(p=>game.entry-p.offset/.8);
@@ -120,8 +134,7 @@ function renderIndicator(snapshot:IndicatorSnapshot){
  const range=document.querySelector<SVGRectElement>('#chart-range')!;
  range.setAttribute('y',String(y(snapshot.rangeHigh||game.price)));range.setAttribute('height',String(Math.max(0,y(snapshot.rangeLow||game.price)-y(snapshot.rangeHigh||game.price))));
  (['entry','stop','target'] as const).forEach(key=>{const element=document.querySelector<SVGLineElement>(`#chart-${key}`)!;element.style.display=snapshot[key]>0?'':'none';element.setAttribute('y1',String(y(snapshot[key])));element.setAttribute('y2',String(y(snapshot[key])));});
- $('#terrain-state').textContent=snapshot.stage==='tp'?LEXICON.tp:snapshot.stage==='sl'?LEXICON.sl:snapshot.activeSide?'Tu villa está activa':snapshot.stage==='range'?LEXICON.range:snapshot.stage==='sweep'?LEXICON.sweep:snapshot.stage==='structure'?LEXICON.structure:snapshot.stage==='retest'?LEXICON.retest:'Preparando la salida';
-
+ $('#terrain-state').textContent=stageLabel(snapshot.stage);
 }
 function openPanel(name:string){clearMovement();if(game.source==='demo'&&game.phase==='running'){game.togglePause();renderState();}panel=name;if(name==='village')renderShop();else if(name==='history')renderHistory();else renderHelp();if(!dialog.open)dialog.showModal();}
 function closePanel(){dialog.close();panel='';document.querySelectorAll('[data-nav]').forEach(el=>el.classList.toggle('selected',(el as HTMLElement).dataset.nav==='play'));}
@@ -135,10 +148,10 @@ function renderHistory(){
 }
 function renderHelp(){
  $('#dialog-kicker').textContent='BIENVENIDO A CRAZYPIG';
- $('#dialog-content').innerHTML=`<h2>Aquí manda el cerdo.</h2><p class="dialog-intro">Roble y Brasa disputan el mismo valle. Un cerdo un poco loco recorre una pista infinita mientras tú exploras su lateral.</p><div class="help-steps"><div><b>01</b><section><h3>Elige 1, 2 o 3 bolsas.</h3><p>Decides cuántas llevas antes de empezar. No puedes cambiarlas durante el recorrido.</p></section></div><div><b>02</b><section><h3>Corre por tu villa.</h3><p>Usa las flechas, WASD o los botones táctiles para recoger monedas y joyas. La señal activa tu villa: Roble para LONG y Brasa para SHORT. El jugador no cambia el sentido del recorrido.</p></section></div><div><b>03</b><section><h3>Ofrece en la valla.</h3><p>Acércate a la valla y pulsa Ofrecer o la tecla E. El montón crecerá y los aldeanos celebrarán, pero la dirección del cerdo sigue marcada por el MNQ.</p></section></div></div><div class="demo-note"><strong>Estás en una demostración.</strong><p>Los datos son simulados. El tesoro oficial no está conectado y no se ejecutan operaciones ni se liquidan premios oficiales. Las reglas definitivas llegarán después.</p></div><button class="primary full" data-action="close">Entendido. ¡Al valle! ${icon('arrow',18)}</button>`;
+ $('#dialog-content').innerHTML=`<h2>Aquí manda el cerdo.</h2><p class="dialog-intro">Roble y Brasa disputan el mismo valle. Un cerdo un poco loco abre puertas, rompe arcos y persigue el botín mientras tú corres por el lateral.</p><div class="help-steps"><div><b>01</b><section><h3>Elige 1, 2 o 3 bolsas.</h3><p>Decides cuántas llevas antes de empezar. No puedes cambiarlas durante el recorrido.</p></section></div><div><b>02</b><section><h3>Corre por tu villa.</h3><p>Usa las flechas, WASD o los botones táctiles para recoger monedas y joyas. Cuando el cerdo embiste, despierta Villa Roble o Villa Brasa. Tú no eliges el sentido.</p></section></div><div><b>03</b><section><h3>Ofrece en la valla.</h3><p>Acércate a la valla y pulsa Ofrecer o la tecla E. El cerdo se lanza, el montón crece y la villa celebra.</p></section></div></div><div class="demo-note"><strong>Estás en una demostración.</strong><p>Los datos son simulados. El tesoro oficial no está conectado y no se ejecutan operaciones ni se liquidan premios oficiales.</p></div><button class="primary full" data-action="close">Entendido. ¡Al valle! ${icon('arrow',18)}</button>`;
 }
 function formatTime(n:number){return `${Math.floor(n/60).toString().padStart(2,'0')}:${Math.floor(n%60).toString().padStart(2,'0')}`;}
-function begin(){if(!loaded||!game.start(performance.now())){toast('El valle todavía está cargando.');return;}villageRun.reset();horus.reset(game);clearMovement();acornID=null;lastIndicatorStage='range';renderState();renderRunner();chime(480);}
+function begin(){if(!loaded||!game.start(performance.now())){toast('El valle todavía está cargando.');return;}villageRun.reset();horus.reset(game);clearMovement();acornID=null;lastIndicatorStage='range';renderState();renderRunner();chime(480);flashQuest('range',0);}
 async function finish(){
  if(!game.finish())return;
  const visit={id:uniqueID(),date:new Date().toISOString(),seconds:game.elapsed,distance:game.distance,bags:game.bags,source:game.source};
@@ -147,7 +160,7 @@ async function finish(){
  toast(saved?`Recorrido guardado. +${reward} monedas de villa de tu mochila. Ofrendas: ${villageRun.deposited}.`:'No se pudo guardar el recorrido ni los recursos.');chime(380);
 }
 $('#start').addEventListener('click',begin);$('#pause').addEventListener('click',()=>{game.togglePause();renderState();});$('#finish').addEventListener('click',()=>void finish());
-function offer(){if(game.phase!=='running'||!game.fresh(performance.now())||dialog.open)return;const value=villageRun.deposit();if(value){chime(720);renderRunner();}}
+function offer(){if(game.phase!=='running'||!game.fresh(performance.now())||dialog.open)return;const value=villageRun.deposit();if(value){chime(720);valley?.offerImpact();$('#offer').classList.remove('juice-pop');void $('#offer').offsetWidth;$('#offer').classList.add('juice-pop');renderRunner();}}
 $('#offer').addEventListener('click',offer);
 document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach(button=>{
  let pressedAt=0;
@@ -163,7 +176,7 @@ window.addEventListener('blur',clearMovement);
 $('#acorn').addEventListener('click',async()=>{const id=acornID;if(!id||!game.active)return;acornID=null;$('#acorn').hidden=true;if(await transaction(w=>collect(w,id))){toast('+10 monedas de villa. ¡El valle tiene sus detalles!');chime(740);}nextAcorn=game.elapsed+20;});
 document.addEventListener('click',async e=>{
  const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button)return;
- if(button.dataset.bags){game.setBags(Number(button.dataset.bags));renderState();chime(340+game.bags*70);}
+ if(button.dataset.bags){game.setBags(Number(button.dataset.bags));renderState();chime(340+game.bags*70);button.classList.remove('juice-pop');void button.offsetWidth;button.classList.add('juice-pop');}
  // Villa selection is owned by the indicator; cards are informative only.
  if(button.dataset.nav){const name=button.dataset.nav;if(name==='play'){if(dialog.open)closePanel();}else openPanel(name);}
  if(button.dataset.buy){const key=button.dataset.buy as Item;if(await transaction(w=>purchase(w,key))){renderShop();toast(`${CATALOG[key].title}: tu valle acaba de cambiar.`);chime(600);}else toast('No se pudo comprar esta mejora.');}
@@ -205,9 +218,13 @@ function frame(now:number){
   valley?.render(game,wallet,dt,now,villageRun,indicator,priceFrame);
 
   if(valley&&valley.fartEvent!==fartSeen){fartSeen=valley.fartEvent;toast('El cerdo tiene sus propias costumbres…');chime(110);}
-  if(indicator.stage!==lastIndicatorStage){if(indicator.stage==='long'||indicator.stage==='short')toast(indicator.label);if(indicator.stage==='tp'||indicator.stage==='sl'){$('#race-result').hidden=false;$('#result-title').textContent=indicator.stage==='tp'?'El cerdo ha llegado al premio.':'El cerdo ha alcanzado el límite.';$('#result-detail').textContent=`${indicator.stage==='tp'?LEXICON.tp:LEXICON.sl} ${fmtPrice(indicator.exitPrice??0)} · Solo ensayo. El tesoro oficial no cambia.`;$('#pause').hidden=true;clearMovement();chime(indicator.stage==='tp'?740:260);}lastIndicatorStage=indicator.stage;}
+  if(indicator.stage!==lastIndicatorStage){
+   flashQuest(indicator.stage,indicator.direction);
+   if(indicator.stage==='tp'||indicator.stage==='sl'){$('#race-result').hidden=false;$('#result-title').textContent=indicator.stage==='tp'?'¡Botín del día!':'Herida mortal.';$('#result-detail').textContent=`${indicator.stage==='tp'?LEXICON.tp:LEXICON.sl}. Solo ensayo. El tesoro oficial no cambia.`;$('#pause').hidden=true;clearMovement();chime(indicator.stage==='tp'?740:260);}
+   lastIndicatorStage=indicator.stage;
+  }
   renderIndicator(indicator);
-  if(now-lastUI>150){$('#time').textContent=formatTime(game.elapsed);$('#distance').textContent=`${Math.floor(game.distance)} m`;$('#mode-label').textContent=game.source==='demo'?'Modo demostración':game.fresh(now)?'Conectado · solo visual':'Esperando datos';if(game.active)renderRunner();lastUI=now;}
+  if(now-lastUI>150){$('#time').textContent=formatTime(game.elapsed);$('#distance').textContent=`${Math.floor(game.distance)} m`;$('#mode-label').textContent=storyMode?'Relato del valle':game.source==='demo'?'Modo demostración':game.fresh(now)?'Conectado · solo visual':'Esperando datos';if(game.active)renderRunner();lastUI=now;}
  }
  raf=requestAnimationFrame(frame);
 }

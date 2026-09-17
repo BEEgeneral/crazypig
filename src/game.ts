@@ -72,7 +72,28 @@ export class DemoFeed {
     this.elapsed+=Math.min(dt,.1);
     if(this.elapsed-this.last<.25)return;
     this.last=this.elapsed;
-    const value=20000+3*Math.sin(this.elapsed*.19)+1.25*Math.sin(this.elapsed*.61);
-    game.quote({symbol:'MNQ',price:Math.round(value*4)/4,sequence:this.sequence++,time:now},now);
+    const base=20000+3*Math.sin(this.elapsed*.19)+1.25*Math.sin(this.elapsed*.61);
+    const wick=this.elapsed>12?5.5*Math.sin(this.elapsed*.48)*Math.max(0,Math.sin(this.elapsed*.09)):0;
+    game.quote({symbol:'MNQ',price:Math.round((base+wick)*4)/4,sequence:this.sequence++,time:now},now);
+  }
+}
+
+/** Scripted demo quotes that walk the real HorusDemo through smash → gate → KO. Presentation only. */
+export class StoryFeed {
+  private elapsed=0;private last=-Infinity;private sequence=0;
+  update(dt:number,now:number,game:Game){
+    if(game.source!=='demo'||game.phase==='paused')return;
+    this.elapsed+=Math.min(dt,.1);
+    if(this.elapsed-this.last<.08)return;
+    this.last=this.elapsed;
+    const t=game.active?game.elapsed:this.elapsed;
+    let price=20000;
+    if(t<12.2)price=20000+.35*Math.sin(t*2);
+    else if(t<13.5)price=20010;
+    else if(t<14.4)price=19999.5;
+    else if(t<15.4)price=19997;
+    else if(t<18.2)price=19999;
+    else price=20018;
+    game.quote({symbol:'MNQ',price:Math.round(price*4)/4,sequence:this.sequence++,time:now},now);
   }
 }

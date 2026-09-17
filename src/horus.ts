@@ -45,7 +45,7 @@ export class HorusDemo{
       rangeHigh:game.price,
       rangeLow:game.price,
       rangeWidth:MINTICK,
-      label:'Niebla de la mañana · acumulando Hi/Lo',
+      label:'Niebla de la mañana · el corredor se estrecha',
     };
   }
 
@@ -64,8 +64,8 @@ export class HorusDemo{
         this.state.rangeWidth=Math.max(MINTICK,this.state.rangeHigh-this.state.rangeLow);
         this.state.progress=Math.min(1,t/RANGE_BUILD_SEC);
         this.state.label=t<RANGE_BUILD_SEC
-          ?'Niebla de la mañana · acumulando Hi/Lo'
-          :'Rango listo · esperando barrida de jabalíes';
+          ?'Niebla de la mañana · el corredor se estrecha'
+          :'Niebla lista · esperando barrida de jabalíes';
         if(t>=RANGE_BUILD_SEC){
           // Lock a slightly tighter band so the synthetic path can print a real sweep.
           const mid=(this.state.rangeHigh+this.state.rangeLow)/2;
@@ -75,7 +75,7 @@ export class HorusDemo{
           this.state.rangeWidth=Math.max(MINTICK,this.state.rangeHigh-this.state.rangeLow);
           this.rangeLocked=true;
           this.state.progress=1;
-          this.state.label='Rango fijo · esperando barrida de jabalíes';
+          this.state.label='Niebla lista · esperando barrida de jabalíes';
         }
       }else{
         this.state.progress=1;
@@ -94,10 +94,10 @@ export class HorusDemo{
           this.state.stage='sweep';
           this.state.progress=0;
           this.state.label=this.state.direction===-1
-            ?'Barrida por arriba · preparando embestida SHORT'
-            :'Barrida por abajo · preparando embestida LONG';
+            ?'¡Barrida en las cumbres de Roble!'
+            :'¡Barrida en las puertas de Brasa!';
         }else{
-          this.state.label='Rango fijo · esperando barrida de jabalíes';
+          this.state.label='Niebla lista · esperando barrida de jabalíes';
         }
       }
     }else if(this.state.stage==='sweep'){
@@ -116,7 +116,7 @@ export class HorusDemo{
           :(this.state.rangeLow+this.state.rangeHigh)/2;
         this.state.stage='structure';
         this.state.progress=0;
-        this.state.label='Cuerno del valle · esperando confirmación breaker';
+        this.state.label='El cerdo se clava · el cuerno brilla';
       }
     }else if(this.state.stage==='structure'){
       // Breaker-style confirmation: price accepts the reclaim level in trade direction.
@@ -138,7 +138,7 @@ export class HorusDemo{
         this.state.stage='retest';
         this.state.progress=0;
         this.armedAt=t;
-        this.state.label='Señal armada · esperando retorno a la puerta';
+        this.state.label='¡A la puerta del valle!';
       }
     }else if(this.state.stage==='retest'){
       const near=Math.abs(p-this.state.entry)<=Math.max(.5,this.state.rangeWidth*.35);
@@ -155,8 +155,8 @@ export class HorusDemo{
         this.state.activeSide=dir===1?-1:1;
         this.state.progress=0;
         this.state.label=dir===1
-          ?'Embestida LONG · Villa Roble activa'
-          :'Embestida SHORT · Villa Brasa activa';
+          ?'¡Embestida hacia Villa Roble!'
+          :'¡Embestida hacia Villa Brasa!';
       }
     }else if(this.state.stage==='long'||this.state.stage==='short'){
       const dir=this.state.direction as -1|1;

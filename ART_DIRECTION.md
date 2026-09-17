@@ -4,30 +4,53 @@
 
 Torneo medieval luminoso y cómico: cerdo expresivo con casco, villas azul y roja, madera, estandartes, gradas y hierba. Interfaz de pergamino y latón sobre madera oscura. El cerdo ocupa el centro; las acciones y las monedas de villa son una capa independiente del recorrido.
 
+## Soft reboot (capa de fantasía)
+
+Se rehízo la capa jugable. **No** se tocó el cerebro de producto: máquina Will (`HorusDemo` + `applyExternalSignal`), `valley-laws`, webhook admin / `GET /api/horus/latest`, ni órdenes reales.
+
+Referencias de feel: Clash Royale / Fall Guys (silueta leíble), Mario Kart / Temple Run (pista y persecución), Crossy Road (impacto inmediato). Prioridad: que el cerdo **choque** con el gráfico, no que lo etiquete.
+
+### Cerdo
+
+`PigActor` procedural: proporciones cómicas, casco de acero con cresta de latón, hocico grande, galope de cuatro patas, poses de smash / skid / charge / crash / lunge / walk. El gag de polvo/pedo sigue siendo presentación.
+
+### Chart → colisión (mapa)
+
+Eje largo = tiempo (scroll). Eje transversal = cotización (`price-terrain`, Roble = precio alto / −Z). Los props se colocan en esos niveles y se rompen al cambiar de stage Will.
+
+| Stage Will | En pista (lenguaje del valle) |
+|---|---|
+| `range` | Niebla / corredor estrecho; el cerdo trota |
+| `sweep` dir −1 | **Barrida en cumbres de Roble**: arco azul se destroza, partículas, shake |
+| `sweep` dir +1 | **Barrida en puertas de Brasa**: arco rojo igual |
+| `structure` | Cerdo se clava (skid, polvo); cuerno/puerta brilla |
+| `retest` | **Rompe la puerta**: el cerdo carga y parte el travesaño |
+| `long` / `short` | Embestida; carril Roble (azul) o Brasa (rojo); galope |
+| `tp` | Cofre de botín; monedas al impacto |
+| `sl` | Muro de espinas / escudo; KO cómico, estrellas, tumba |
+| `flat` | Campana del castillo; el cerdo camina |
+
+Wicks fuertes: el cerdo se tambalea en Z y golpea barriles. **Ofrecer** = lunge del cerdo + burst (sigue sin orden real).
+
+Implementación: `src/stage-track.ts` (`chartBeat`, `StageTrack`). Relato rápido para ensayos: `?story=1` (sigue usando `HorusDemo`, solo cambia las cotizaciones sintéticas).
+
+### Cámara y HUD
+
+Cámara de persecución con follow al eje de precio y shake en impactos. HUD de pergamino/latón: **QUEST DEL VALLE**, toasts en léxico (`Niebla`, `Barrida`, `Cuerno`, `Embestida`, `Botín`, `Herida`). Cero LONG/SHORT/SL/TP/MNQ en UI de jugador.
+
 ## Implementado en esta versión
 
-- Cerdo importado de `CP_Pig.blend`, orientado y colocado sobre el suelo. Ojos, pupilas y remaches añadidos; materiales de piel, acero y cuero. Copia editable: `art/CrazyPig_Hero.blend`. Archivo web: `public/models/pig-hero.glb`. En esta base el zip no incluye GLB: `ValleyScene` usa el héroe procedural `PigActor` y stand-ins de casas/árboles/vallas hasta que `scripts/export_web.py` deje `public/models/valley.glb`.
-- Exportación corregida de los colores de vértice de la biblioteca de edificios, árboles y vallas.
-- Gradas con público instanciado, colores de los equipos, banderas, texturas procedurales de hierba y arena, luz cálida y sombras.
-- Retratos proporcionados por el usuario de Sir Edrick y Lord Alaric integrados en marcos heráldicos. Son imágenes, no nuevos personajes humanos 3D.
-- Interfaz adaptada a escritorio y móvil. Selección de 1–3 bolsas, recorrido, pausa en demostración, final manual, diario y tienda cosmética conservados.
-- Durante el recorrido la cámara se coloca como una carrera hacia delante. Los laterales contienen un carril por villa, un aldeano controlable, 40 recursos reciclados, corredores de fondo y montones visibles junto a las vallas.
-- El panel Horus muestra un replay local del Pine: rango 06–09, barrida, estructura, retorno y resultado 1R. El ancho de la carretera se escala con el ancho del rango y la villa activa se asigna por dirección (LONG Roble, SHORT Brasa).
-- El héroe tiene movimiento procedural de carrera con cuatro patas, cola, rebote, polvo y puffs verdes periódicos para el gag del pedo. El aviso se acompaña de una señal sonora solo cuando el usuario activa el sonido.
+- Carriles Roble/Brasa saturados, bordillos de arena, niebla de mañana, arcos rompibles, puerta/cuerno, cofre, espinas, barriles.
+- Toasts de quest y flash de pergamino en cada cambio de stage.
+- Retratos de Sir Edrick y Lord Alaric (imágenes). Admin y tesoro oficial desconectados.
 
 ## Procedencia
 
-Referencias originales en `/Users/albertogala/Downloads/From：Local Computer/Dropbox/PROYECTOS/CrazyPig/`. Se mantienen intactas.
+Referencias originales en Dropbox CrazyPig. Se mantienen intactas.
 
-- Cerdo: `CP_Pig.blend`.
-- Azul: `Señores/Default_Seor_Medieval_de_Escudo_Azul_Sir_EdrickApariencia_Rop_3.jpeg`.
-- Rojo: `Señores/Default_Seor_Medieval_de_Escudo_Rojo_Lord_AlaricApariencia_Ro_3.jpeg`.
-- Referencia de dirección artística: `x2e9GnoITxupQsE6qMEzjg.jpeg`.
+- Cerdo: `CP_Pig.blend` (el runtime usa `PigActor` hasta haber GLB).
+- Azul / rojo: retratos de Edrick y Alaric.
 
-## Límites y siguientes entregas
+## Límites
 
-La escena conserva edificios y público simplificados; no reproduce todavía el nivel cinematográfico de la portada. El cerdo usa movimiento procedural del conjunto, sin rig esquelético ni ciclo de patas independiente. Los señores humanos necesitan modelado y animación finales.
-
-El feed actual es simulado. `marketAdapter` acepta precios externos solo para visualización; no conecta Apex, no envía órdenes, no agrupa cuentas y no liquida el tesoro oficial. Las reglas reales del Pine deben llegar por un puente de alertas para sustituir `HorusDemo`; el indicador original sigue siendo una ayuda visual de ejecución manual. Agua, alimentos y alimentación del cerdo son mecánicas futuras. En esta iteración ya funcionan monedas y joyas: las joyas valen cinco monedas de villa, se recogen al contacto y se ofrecen únicamente junto a la valla. Los montones y el júbilo de la villa son visuales.
-
-Las animaciones y compras cosméticas no modifican `Game.offset`, contratos ni resultados operativos. La presentación comprime desplazamientos grandes para mantener al cerdo en pista; la posición lógica se conserva.
+Sin OAuth Tradovate ni órdenes. `marketAdapter` y `?source=external` son solo visuales. Cosméticos y colisiones no escriben `Game.offset`, contratos ni tesoro oficial.

@@ -6,6 +6,7 @@ import { RunnerView } from './runner-view';
 import type {IndicatorSnapshot} from './horus';
 import {PigActor} from './pig-actor';
 import {priceToGround,type PriceFrame} from './price-terrain';
+import {StageTrack} from './stage-track';
 
 export class ValleyScene {
   renderer:THREE.WebGLRenderer;
@@ -29,23 +30,28 @@ export class ValleyScene {
   private cameraTarget=new THREE.Vector3(-1,1,0);
   private pigGeneration=-1;private lastOffset=0;private reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   private lightSeed=new Float32Array(90);
+  private track=new StageTrack();
+  private chaseZ=0;private lookZ=0;
+  impactEvent=0;
   ready=false;lost=false;
   constructor(private container:HTMLElement,private onError:(message:string)=>void){
     this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
-    this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;
-    this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.05;
-    this.renderer.setClearColor(0xb4b8aa,1);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+    this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.18;
+    this.renderer.setClearColor(0xc5d6e4,1);
     this.renderer.domElement.setAttribute('aria-label','Escenario 3D: el cerdo y las villas Roble y Brasa');
     this.renderer.domElement.setAttribute('role','img');container.append(this.renderer.domElement);
     this.renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.lost=true;this.onError('La vista 3D se ha detenido. Recarga para recuperar el valle.');});
-    this.scene.fog=new THREE.Fog(0xb4b8aa,42,88);
-    const ambient=new THREE.HemisphereLight(0xe8f4ff,0x56513f,1.25);this.scene.add(ambient);
-    const sun=new THREE.DirectionalLight(0xffe5c3,2.3);sun.position.set(8,18,12);sun.castShadow=true;
-    sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-22;sun.shadow.camera.right=22;sun.shadow.camera.top=22;sun.shadow.camera.bottom=-22;sun.shadow.camera.far=70;sun.shadow.bias=-.0003;sun.shadow.normalBias=.04;this.scene.add(sun);
-    const fill=new THREE.DirectionalLight(0xc5ced1,.45);fill.position.set(-15,8,-12);this.scene.add(fill);
-    this.camera.position.set(16,15,23);this.camera.lookAt(this.cameraTarget);
+    this.scene.fog=new THREE.Fog(0xd7c4a0,36,92);
+    const ambient=new THREE.HemisphereLight(0xfff0d6,0x5a4a32,1.15);this.scene.add(ambient);
+    const sun=new THREE.DirectionalLight(0xffe0b0,2.45);sun.position.set(10,16,8);sun.castShadow=true;
+    const map=matchMedia('(max-width:760px)').matches?1024:1536;
+    sun.shadow.mapSize.set(map,map);sun.shadow.camera.left=-22;sun.shadow.camera.right=22;sun.shadow.camera.top=22;sun.shadow.camera.bottom=-22;sun.shadow.camera.far=70;sun.shadow.bias=-.0003;sun.shadow.normalBias=.04;this.scene.add(sun);
+    const fill=new THREE.DirectionalLight(0xffc9a0,.55);fill.position.set(-12,7,-10);this.scene.add(fill);
+    this.camera.position.set(16,14,22);this.camera.lookAt(this.cameraTarget);
     this.scene.add(this.runner.group);this.runner.group.visible=false;
+    this.scene.add(this.track.group);
     const sparkMat=new THREE.MeshBasicMaterial({color:0xffe489});
     for(let i=0;i<12;i++){const spark=new THREE.Mesh(new THREE.OctahedronGeometry(.1),sparkMat);this.cheer.add(spark);}this.scene.add(this.cheer);this.cheer.visible=false;
     this.trailGeometry.setAttribute('position',new THREE.BufferAttribute(this.positions,3));this.trailGeometry.setDrawRange(0,0);
@@ -59,14 +65,19 @@ export class ValleyScene {
     const fartMaterial=new THREE.MeshBasicMaterial({color:0xaca68e,transparent:true,opacity:.07,depthWrite:false});
     for(let i=0;i<5;i++){const puff=new THREE.Mesh(new THREE.SphereGeometry(.06+(i%3)*.03,8,6),fartMaterial);puff.visible=false;this.fartPuffs.push(puff);this.pig.add(puff);}
     this.pig.scale.setScalar(3);this.scene.add(this.pig);
-    const meadowMat=new THREE.MeshStandardMaterial({color:0x8a9171,map:this.surfaceTexture('grass'),roughness:1});
-    const roadMat=new THREE.MeshStandardMaterial({color:0xaaa08c,map:this.surfaceTexture('sand'),roughness:1});
-    roadMat.bumpMap=roadMat.map;roadMat.bumpScale=.055;meadowMat.bumpMap=meadowMat.map;meadowMat.bumpScale=.08;
-    const gridMat=new THREE.MeshBasicMaterial({color:0xbdb6a6,transparent:true,opacity:.1});
-    const groundGeo=new THREE.BoxGeometry(16,1,64),roadGeo=new THREE.BoxGeometry(16,.08,8);
-    const sidePathGeo=new THREE.BoxGeometry(16,.05,6.4);
-    const sidePathMat=new THREE.MeshStandardMaterial({color:0x888772,map:this.surfaceTexture('grass'),roughness:1});
-    const stands={Roble:this.grandstand(0x435c6a),Brasa:this.grandstand(0x76534b)};
+    const meadowMat=new THREE.MeshStandardMaterial({color:0x7fa35e,map:this.surfaceTexture('grass'),roughness:.92});
+    const roadMat=new THREE.MeshStandardMaterial({color:0xc4a070,map:this.surfaceTexture('sand'),roughness:.95});
+    roadMat.bumpMap=roadMat.map;roadMat.bumpScale=.06;meadowMat.bumpMap=meadowMat.map;meadowMat.bumpScale=.1;
+    const robleLane=new THREE.MeshStandardMaterial({color:0x2f6ad8,roughness:.48,emissive:0x123a88,emissiveIntensity:.16});
+    const brasaLane=new THREE.MeshStandardMaterial({color:0xd23a32,roughness:.48,emissive:0x6a1210,emissiveIntensity:.16});
+    const curbMat=new THREE.MeshStandardMaterial({color:0x8a6238,roughness:.86});
+    const gridMat=new THREE.MeshBasicMaterial({color:0xe8d7a8,transparent:true,opacity:.22});
+    const groundGeo=new THREE.BoxGeometry(16,1,64),roadGeo=new THREE.BoxGeometry(16,.1,7.2);
+    const sidePathGeo=new THREE.BoxGeometry(16,.06,6.4);
+    const ribbonGeo=new THREE.BoxGeometry(16,.07,2.35);
+    const curbGeo=new THREE.BoxGeometry(16,.16,.28);
+    const sidePathMat=new THREE.MeshStandardMaterial({color:0x8a9468,map:this.surfaceTexture('grass'),roughness:1});
+    const stands={Roble:this.grandstand(0x2a5a9a),Brasa:this.grandstand(0xa43332)};
     for(let i=0;i<8;i++){
       const tile=new THREE.Group();
       const meadow=new THREE.Mesh(groundGeo,meadowMat);meadow.position.y=-.55;meadow.receiveShadow=true;tile.add(meadow);
@@ -77,7 +88,9 @@ export class ValleyScene {
       for(const side of [-1,1]){
         const team=side<0?'Roble':'Brasa';
         const path=new THREE.Mesh(sidePathGeo,sidePathMat);path.position.set(0,.005,side*8.2);path.receiveShadow=true;tile.add(path);
-        for(const lane of [6,8,10]){const guide=new THREE.Mesh(new THREE.BoxGeometry(16,.008,.025),gridMat);guide.position.set(0,.042,side*lane);tile.add(guide);}
+        const ribbon=new THREE.Mesh(ribbonGeo,team==='Roble'?robleLane:brasaLane);ribbon.position.set(0,.04,side*6.9);ribbon.receiveShadow=true;tile.add(ribbon);
+        const curb=new THREE.Mesh(curbGeo,curbMat);curb.position.set(0,.09,side*4.55);tile.add(curb);
+        for(const lane of [8,10]){const guide=new THREE.Mesh(new THREE.BoxGeometry(16,.01,.04),gridMat);guide.position.set(0,.05,side*lane);tile.add(guide);}
         for(let j=0;j<2;j++){
           const house=this.model('House'+team);house.position.set(-5+j*7,0,side*(21.2+(j%2)*1.2));house.rotation.y=side>0?Math.PI:0;house.scale.setScalar(1.6);tile.add(house);
         }
@@ -119,7 +132,7 @@ export class ValleyScene {
     const plane=new THREE.BoxGeometry(118,.008,1);
     this.rangeBand=new THREE.Mesh(plane,new THREE.MeshBasicMaterial({color:0xaec2bb,transparent:true,opacity:.16,depthWrite:false}));this.rangeBand.position.set(30,.04,0);this.scene.add(this.rangeBand);
     for(let i=0;i<2;i++){const edge=new THREE.Mesh(new THREE.BoxGeometry(118,.012,.045),new THREE.MeshStandardMaterial({color:0x97aaa5,roughness:1}));edge.position.set(30,.05,0);this.scene.add(edge);this.rangeEdges.push(edge);}
-    for(const [key,text,color] of [['entry','ENTRADA',0xcac4ac],['target','PREMIO · TP',0x81ac79],['stop','PÉRDIDA · SL',0xb76b52]] as const){
+    for(const [key,text,color] of [['entry','OFRECER',0xcac4ac],['target','BOTÍN',0x81ac79],['stop','HERIDA',0xb76b52]] as const){
       const mesh=new THREE.Mesh(new THREE.BoxGeometry(118,.018,.075),new THREE.MeshStandardMaterial({color,roughness:.9,emissive:color,emissiveIntensity:.1}));mesh.position.set(30,.06,0);this.scene.add(mesh);
       const canvas=document.createElement('canvas');canvas.width=384;canvas.height=96;const ctx=canvas.getContext('2d')!;
       ctx.fillStyle='#242b25';ctx.fillRect(0,0,384,96);ctx.fillStyle='#'+color.toString(16).padStart(6,'0');ctx.fillRect(0,0,8,96);ctx.font='500 29px sans-serif';ctx.textAlign='center';ctx.fillStyle='#eee9d9';ctx.fillText(text,197,58);
@@ -190,10 +203,11 @@ export class ValleyScene {
     this.renderer.setSize(width,height,false);const aspect=width/height;
     const viewHeight=this.wide?26:(width<600?18:19);
     this.camera.left=-viewHeight*aspect/2;this.camera.right=viewHeight*aspect/2;this.camera.top=viewHeight/2;this.camera.bottom=-viewHeight/2;this.camera.updateProjectionMatrix();
-    this.raceCamera.aspect=aspect;this.raceCamera.fov=aspect<1?Math.min(100,2*Math.atan(Math.tan(THREE.MathUtils.degToRad(32))/aspect)*180/Math.PI):55;
-    this.raceCamera.position.set(this.wide?-22:-15,this.wide?17:11,0);this.raceCamera.lookAt(8,0,0);this.raceCamera.updateProjectionMatrix();
+    this.raceCamera.aspect=aspect;this.raceCamera.fov=aspect<1?Math.min(92,2*Math.atan(Math.tan(THREE.MathUtils.degToRad(30))/aspect)*180/Math.PI):58;
+    this.raceCamera.updateProjectionMatrix();
   }
   toggleCamera(){this.wide=!this.wide;this.resize();return this.wide;}
+  offerImpact(){this.track.offerImpact();}
   applyWallet(wallet:Wallet){this.flowers.forEach((p,i)=>p.visible=i<wallet.items.flowers);this.banners.forEach((p,i)=>p.visible=Math.floor(i/2)<wallet.items.banners);this.lanterns.visible=wallet.items.lanterns>0;}
   render(game:Game,wallet:Wallet,dt:number,now:number,run?:VillageRun,indicator?:IndicatorSnapshot,priceFrame?:PriceFrame){
     if(!this.ready||this.lost)return;this.clock+=dt;
@@ -202,13 +216,16 @@ export class ValleyScene {
     const terminal=indicator?.stage==='tp'||indicator?.stage==='sl';
     const value=game.price||20000;
     const z=priceToGround(value,frame);
+    const racing=game.active;
+    this.track.sync(indicator?.stage??'flat',indicator?.direction??0,indicator?.progress??0,racing?z:0,frame,dt,game.distance,racing);
+    this.impactEvent=this.track.lastImpact;
     const active=game.phase==='running'&&game.fresh(now)&&!terminal;
-    // Price and all boundaries use exactly the same transform. No independent auto-zoom.
     this.lastOffset=z;
-    this.pig.position.set(0,0,game.active?z:0);
-    this.pig.rotation.x=0;
-    this.pig.scale.setScalar(game.active?1.45:2.1);
-    this.actor.pose(this.clock,active,this.reduced,indicator?.stage??'flat');
+    const pigZ=racing?z+this.track.lurchZ:0;
+    this.pig.position.set(0,this.track.hopY,pigZ);
+    this.pig.rotation.x=0;this.pig.rotation.z=this.track.offerT*.25*(run?.side??0);
+    this.pig.scale.setScalar(racing?1.55:2.25);
+    this.actor.pose(this.clock,active||this.track.action==='crash',this.reduced,indicator?.stage??'flat',this.track.action,this.track.offerT);
     if(indicator){
       const low=priceToGround(indicator.rangeLow||value,frame),high=priceToGround(indicator.rangeHigh||value,frame);
       this.rangeBand.visible=game.active&&indicator.rangeHigh>indicator.rangeLow;
@@ -235,7 +252,16 @@ export class ValleyScene {
     const cheering=!!run&&game.active&&run.elapsed<run.cheerUntil&&!this.reduced;
     this.cheer.visible=cheering;
     if(cheering&&run){const phase=(2.5-(run.cheerUntil-run.elapsed))/2.5;this.cheer.children.forEach((spark,i)=>spark.position.set(1+Math.sin(i*2.4)*phase*3,1+phase*4,run.cheerSide*(4.6-phase*2)+Math.cos(i)*phase));this.pig.rotation.x+=run.cheerSide*Math.sin(phase*Math.PI)*.025;}
-    this.applyWallet(wallet);this.renderer.render(this.scene,game.active?this.raceCamera:this.camera);
+    this.applyWallet(wallet);
+    if(racing){
+      const follow=1-Math.exp(-(this.wide?4:8)*dt);
+      this.chaseZ+=(pigZ-this.chaseZ)*follow;this.lookZ+=(pigZ-this.lookZ)*Math.min(1,follow*1.15);
+      const shake=this.reduced?0:this.track.shake;
+      const sx=(Math.sin(this.clock*70)*shake*.35);
+      this.raceCamera.position.set(this.wide?-20:-10.2,this.wide?15:5.6+shake*.4,this.chaseZ+sx);
+      this.raceCamera.lookAt(7.5,1.15,this.lookZ);
+      this.renderer.render(this.scene,this.raceCamera);
+    }else this.renderer.render(this.scene,this.camera);
   }
   stats(){return{drawCalls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,tiles:this.tiles.length};}
   dispose(){this.resizeObserver.disconnect();this.renderer.dispose();}
