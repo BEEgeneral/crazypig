@@ -31,7 +31,7 @@ export class ValleyScene {
   private lightSeed=new Float32Array(90);
   ready=false;lost=false;
   constructor(private container:HTMLElement,private onError:(message:string)=>void){
-    this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});
+    this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
     this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.05;
@@ -55,13 +55,7 @@ export class ValleyScene {
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
   }
   async load(){
-    const gltf=await new GLTFLoader().loadAsync('/models/valley.glb');
-    for(const object of gltf.scene.children){
-      object.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=true;o.receiveShadow=true;if(o.material instanceof THREE.MeshStandardMaterial){o.material.roughness=.96;if(!o.material.userData.natural){o.material.color.multiplyScalar(.9);o.material.userData.natural=true;}o.material.side=THREE.DoubleSide;}const colors=o.geometry.getAttribute('color');if(colors&&!o.geometry.userData.muted){for(let j=0;j<colors.count;j++){const r=colors.getX(j),g=colors.getY(j),b=colors.getZ(j),l=r*.3+g*.5+b*.2;colors.setXYZ(j,r*.48+l*.52,g*.48+l*.49,b*.48+l*.43);}colors.needsUpdate=true;o.geometry.userData.muted=true;}}});
-      this.models.set(object.name,object);
-    }
-    const required=['PigBody','PigLegFL','PigLegFR','PigLegBL','PigLegBR','ChiefRoble','ChiefBrasa','HouseRoble','HouseBrasa','Tree','Fence'];
-    for(const name of required)if(!this.models.has(name))throw new Error(`Falta el modelo ${name}`);
+    await this.loadLibrary();
     const fartMaterial=new THREE.MeshBasicMaterial({color:0xaca68e,transparent:true,opacity:.07,depthWrite:false});
     for(let i=0;i<5;i++){const puff=new THREE.Mesh(new THREE.SphereGeometry(.06+(i%3)*.03,8,6),fartMaterial);puff.visible=false;this.fartPuffs.push(puff);this.pig.add(puff);}
     this.pig.scale.setScalar(3);this.scene.add(this.pig);
@@ -132,6 +126,36 @@ export class ValleyScene {
       const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;const label=new THREE.Sprite(new THREE.SpriteMaterial({map,depthTest:false}));label.scale.set(2.9,.725,1);label.renderOrder=3;this.scene.add(label);this.groundLevels.push({key,mesh,label});
     }
     this.hoofMarks=new THREE.InstancedMesh(new THREE.BoxGeometry(.14,.006,.085),new THREE.MeshBasicMaterial({color:0x433c30,transparent:true,opacity:.52}),384);this.hoofMarks.frustumCulled=false;this.scene.add(this.hoofMarks);
+  }
+  private async loadLibrary(){
+    try{
+      const gltf=await new GLTFLoader().loadAsync('/models/valley.glb');
+      for(const object of gltf.scene.children){
+        object.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=true;o.receiveShadow=true;if(o.material instanceof THREE.MeshStandardMaterial){o.material.roughness=.96;if(!o.material.userData.natural){o.material.color.multiplyScalar(.9);o.material.userData.natural=true;}o.material.side=THREE.DoubleSide;}const colors=o.geometry.getAttribute('color');if(colors&&!o.geometry.userData.muted){for(let j=0;j<colors.count;j++){const r=colors.getX(j),g=colors.getY(j),b=colors.getZ(j),l=r*.3+g*.5+b*.2;colors.setXYZ(j,r*.48+l*.52,g*.48+l*.49,b*.48+l*.43);}colors.needsUpdate=true;o.geometry.userData.muted=true;}}});
+        this.models.set(object.name,object);
+      }
+      const required=['PigBody','PigLegFL','PigLegFR','PigLegBL','PigLegBR','ChiefRoble','ChiefBrasa','HouseRoble','HouseBrasa','Tree','Fence'];
+      for(const name of required)if(!this.models.has(name))throw new Error(`Falta el modelo ${name}`);
+    }catch{
+      // Zip/foundation has no Blender GLB; procedural stand-ins keep the valle playable.
+      this.seedPlaceholderModels();
+    }
+  }
+  private seedPlaceholderModels(){
+    const mat=(color:number)=>new THREE.MeshStandardMaterial({color,roughness:.92});
+    const add=(parent:THREE.Object3D,geo:THREE.BufferGeometry,color:number,x:number,y:number,z:number,sx=1,sy=1,sz=1)=>{
+      const mesh=new THREE.Mesh(geo,mat(color));mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;
+    };
+    const named=(name:string,build:(g:THREE.Group)=>void)=>{const g=new THREE.Group();g.name=name;build(g);this.models.set(name,g);};
+    for(const team of [{name:'Roble',wood:0x3d5a68,cloth:0x4a6a78,roof:0x2f4550},{name:'Brasa',wood:0x6a4338,cloth:0x7a5348,roof:0x4a2e28}] as const){
+      named('House'+team.name,g=>{add(g,new THREE.BoxGeometry(1.2,.9,1.1),team.wood,0,.45,0);const roof=add(g,new THREE.ConeGeometry(.95,.7,4),team.roof,0,1.15,0);roof.rotation.y=Math.PI/4;});
+      named('Tower'+team.name,g=>{add(g,new THREE.CylinderGeometry(.35,.42,2.2,8),team.wood,0,1.1,0);add(g,new THREE.ConeGeometry(.5,.7,8),team.roof,0,2.55,0);});
+      named('Banner'+team.name,g=>{add(g,new THREE.CylinderGeometry(.04,.04,2.2,6),0x5a4634,0,1.1,0);add(g,new THREE.PlaneGeometry(.9,1.1),team.cloth,.48,1.4,0);});
+      named('Chief'+team.name,g=>{add(g,new THREE.CapsuleGeometry(.22,.5,4,8),team.cloth,0,1.1,0);add(g,new THREE.SphereGeometry(.2,8,6),0xd2a479,0,1.7,0);});
+    }
+    named('Tree',g=>{add(g,new THREE.CylinderGeometry(.12,.18,1.1,6),0x5a4634,0,.55,0);add(g,new THREE.IcosahedronGeometry(.7,0),0x4d6a3e,0,1.4,0);});
+    named('Fence',g=>{for(const x of [-.6,0,.6])add(g,new THREE.BoxGeometry(.08,.7,.08),0x8a6d4a,x,.35,0);add(g,new THREE.BoxGeometry(1.4,.08,.06),0x9a7a54,0,.45,0);});
+    for(const name of ['PigBody','PigLegFL','PigLegFR','PigLegBL','PigLegBR'])named(name,g=>{add(g,new THREE.SphereGeometry(.2,8,6),0xc5aba1,0,.2,0);});
   }
   private model(name:string){const template=this.models.get(name);if(!template)throw new Error('Modelo no disponible: '+name);return template.clone(true);}
   private surfaceTexture(kind:'grass'|'sand'){

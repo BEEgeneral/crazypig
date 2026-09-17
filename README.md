@@ -28,6 +28,8 @@ No añadas secretos de bróker ni de TradingView al repositorio. Credenciales de
 
 ## Arte
 
+Sin `public/models/valley.glb` el valle arranca con geometría procedural (casas, vallas, árboles). Cuando exista el export de Blender, se usa automáticamente.
+
 `scripts/export_web.py` exporta la biblioteca de Blender del proyecto contiguo `CrazyPigUnreal` e incluye el atributo de color de vértice `Color`.
 
 `scripts/prepare_reference_pig.py` recibe, tras `--`, la ruta absoluta de este proyecto y la ruta al `CP_Pig.blend` original. Ejecutarlo con Blender en segundo plano y `--disable-autoexec`. Escribe únicamente una copia derivada dentro de este proyecto y su GLB.

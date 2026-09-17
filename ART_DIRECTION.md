@@ -6,7 +6,7 @@ Torneo medieval luminoso y cómico: cerdo expresivo con casco, villas azul y roj
 
 ## Implementado en esta versión
 
-- Cerdo importado de `CP_Pig.blend`, orientado y colocado sobre el suelo. Ojos, pupilas y remaches añadidos; materiales de piel, acero y cuero. Copia editable: `art/CrazyPig_Hero.blend`. Archivo web: `public/models/pig-hero.glb`.
+- Cerdo importado de `CP_Pig.blend`, orientado y colocado sobre el suelo. Ojos, pupilas y remaches añadidos; materiales de piel, acero y cuero. Copia editable: `art/CrazyPig_Hero.blend`. Archivo web: `public/models/pig-hero.glb`. En esta base el zip no incluye GLB: `ValleyScene` usa el héroe procedural `PigActor` y stand-ins de casas/árboles/vallas hasta que `scripts/export_web.py` deje `public/models/valley.glb`.
 - Exportación corregida de los colores de vértice de la biblioteca de edificios, árboles y vallas.
 - Gradas con público instanciado, colores de los equipos, banderas, texturas procedurales de hierba y arena, luz cálida y sombras.
 - Retratos proporcionados por el usuario de Sir Edrick y Lord Alaric integrados en marcos heráldicos. Son imágenes, no nuevos personajes humanos 3D.
