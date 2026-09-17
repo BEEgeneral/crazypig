@@ -1,0 +1,23 @@
+const shapes:Record<string,string>={
+play:'<path d="m9 5 11 7-11 7z" fill="currentColor" stroke="none"/>',
+pause:'<path d="M8 5v14M16 5v14" stroke-width="4"/>',
+home:'<path d="m3 10 9-7 9 7M5 9v11h14V9M10 20v-7h4v7"/>',
+village:'<path d="M3 21V9h7v12M14 21V4h7v17M1 21h22M3 9l3.5-6L10 9M14 4l3.5-3L21 4M6 13v2m11-7v2m0 4v2"/>',
+book:'<path d="M12 6c-3-3-7-3-10-2v16c3-1 7-1 10 2 3-3 7-3 10-2V4c-3-1-7-1-10 2Zm0 0v16"/>',
+help:'<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 1 1 5 2c-2 1-2 2-2 3m0 3h.01"/>',
+sound:'<path d="m11 4-6 5H2v6h3l6 5zM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+mute:'<path d="m11 4-6 5H2v6h3l6 5zM16 9l6 6m0-6-6 6"/>',
+expand:'<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>',
+camera:'<path d="M3 7h5l2-3h4l2 3h5v13H3z"/><circle cx="12" cy="13" r="4"/>',
+arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',
+close:'<path d="m6 6 12 12M18 6 6 18"/>',
+check:'<path d="m5 12 4 4L19 6"/>',
+coin:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.5"/><path d="M12 8v8m-2-2h4"/>',
+flag:'<path d="M5 22V3m0 1c5-5 9 5 15 0v10c-6 5-10-5-15 0"/>',
+flower:'<path d="M12 22v-9m0 6 5-3m-5 1-4-3"/><path d="M12 3c5-6 9 3 3 4 6 2 1 10-3 5-4 5-9-3-3-5-6-1-2-10 3-4Z"/>',
+spark:'<path d="m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5z"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+leaf:'<path d="M20 3C7 1 0 9 6 16c7 7 15 0 14-13Z M4 21 16 8"/>',
+bag:'<path d="m8 3 2 5h4l2-5-4 1z" fill="currentColor" opacity=".7"/><path d="M9 8c-2 3-6 5-6 10 0 4 18 4 18 0 0-5-4-7-6-10z" fill="currentColor" opacity=".85" stroke="none"/><path d="M8 8h8" stroke="currentColor"/><path d="M12 12v6m-2-1h4" stroke="#fff5d6" stroke-width="1.5"/>',
+};
+export const icon=(name:string,size=24)=>`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shapes[name]??shapes.spark}</svg>`;
