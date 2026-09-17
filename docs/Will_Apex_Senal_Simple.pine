@@ -1,0 +1,326 @@
+//@version=6
+// Will Apex · Señal simple — playbook Alberto (Will Street + blindaje Apex)
+indicator(
+     title      = "Will Apex · Señal simple",
+     shorttitle = "Will Apex",
+     overlay    = true,
+     max_lines_count  = 50,
+     max_labels_count = 50,
+     max_boxes_count  = 20)
+
+// Manual only. No broker / no auto-orders. Apex: no automation.
+
+// ——— Constants ———
+string TZ_NY       = "America/New_York"
+int    MS_90M      = 90 * 60 * 1000
+color  COL_RANGE   = color.new(#2962FF, 88)
+color  COL_LONG    = #26A69A
+color  COL_SHORT   = #EF6C00
+color  COL_SL      = #F44336
+color  COL_TP      = #4CAF50
+color  COL_ENTRY   = #FF9800
+
+// ——— Inputs ———
+string GRP_S = "Sesión (America/New_York)"
+string rangeSessionInput  = input.session("0600-0900", "Vela 6 · liquidez Hi/Lo", group = GRP_S)
+string entrySessionInput  = input.session("0900-1030", "Ventana de entradas", group = GRP_S)
+int    flatHourInput      = input.int(16, "Flat preventivo · hora", minval = 0, maxval = 23, group = GRP_S)
+int    flatMinuteInput    = input.int(50, "Flat preventivo · minuto", minval = 0, maxval = 59, group = GRP_S)
+
+string GRP_B = "Breaker"
+int    swingLenInput      = input.int(2, "Pivot (barras cada lado)", minval = 1, maxval = 5, group = GRP_B)
+int    sweepTicksInput    = input.int(2, "Ticks mínimos fuera del rango", minval = 1, group = GRP_B)
+int    slBufferTicksInput = input.int(4, "Buffer SL (ticks)", minval = 0, group = GRP_B)
+bool   openFilterInput    = input.bool(true, "Aviso filtro open vela 9", group = GRP_B,
+     tooltip = "Longs mejores bajo open 09:00; shorts sobre open. No bloquea.")
+
+string GRP_A = "Blindaje Alberto / Apex"
+float  riskUsdInput       = input.float(120.0, "Riesgo $ por trade", group = GRP_A)
+float  tickValueInput     = input.float(0.50, "Valor tick MNQ ($)", group = GRP_A)
+int    maxMnqInput        = input.int(3, "Máx MNQ", minval = 1, maxval = 3, group = GRP_A)
+float  personalDllInput   = input.float(280.0, "Pérdida diaria máx $", group = GRP_A)
+float  profitCapInput     = input.float(750.0, "Techo profit diario $", group = GRP_A)
+bool   markBeInput        = input.bool(false, "1er trade fue BE → permitir 2º", group = GRP_A,
+     tooltip = "Actívalo a mano tras un BE. Sin eso solo 1 señal/día.")
+bool   showPanelInput     = input.bool(true, "Panel", group = GRP_A)
+bool   enableAlertsInput  = input.bool(true, "Alertas", group = GRP_A)
+
+// ——— Helpers ———
+f_px(float x) =>
+    str.tostring(x, format.mintick)
+
+f_qty(float stopDist) =>
+    float ticksRisk = stopDist / syminfo.mintick
+    float usdPerCtr = ticksRisk * tickValueInput
+    int q = usdPerCtr > 0 ? int(math.floor(riskUsdInput / usdPerCtr)) : 0
+    math.max(0, math.min(maxMnqInput, q))
+
+// ——— Session / day ———
+bool chartOk = timeframe.isminutes and timeframe.multiplier == 5
+bool weekdayOk =
+     dayofweek(time, TZ_NY) >= dayofweek.monday and
+     dayofweek(time, TZ_NY) <= dayofweek.friday
+bool inRangeBuild = not na(time(timeframe.period, rangeSessionInput, TZ_NY))
+bool inEntryWin   = not na(time(timeframe.period, entrySessionInput, TZ_NY))
+
+int nyY = year(time, TZ_NY)
+int nyM = month(time, TZ_NY)
+int nyD = dayofmonth(time, TZ_NY)
+// Tras 18:00 NY la sesión operativa cuenta como día siguiente
+int sessKey = timestamp(TZ_NY, nyY, nyM, nyD + (hour(time, TZ_NY) >= 18 ? 1 : 0), 12, 0)
+bool newDay = ta.change(sessKey) != 0
+int flatTs  = timestamp(TZ_NY, nyY, nyM, nyD, flatHourInput, flatMinuteInput)
+
+float pivotHi = ta.pivothigh(high, swingLenInput, swingLenInput)
+float pivotLo = ta.pivotlow(low, swingLenInput, swingLenInput)
+
+// ——— State ———
+var float rangeHi = na
+var float rangeLo = na
+var float open9   = na
+var box   rangeBox = na
+var line  hiGuide  = na
+var line  loGuide  = na
+var line  openGuide = na
+
+var int   phase = 0          // 0 idle · 1 wait sweep · 2 wait breaker · 3 shown · 4 done
+var int   bias  = 0          // 1 long · -1 short
+var float sweepExtreme = na
+var float breakerLevel = na
+var int   breakerBar   = na
+
+var float entryPx = na
+var float stopPx  = na
+var float tpPx    = na
+var int   qtyMnq  = 0
+var int   tradesToday = 0
+var float dayNetNote  = 0.0   // informativo; no lee broker
+var string statusTxt  = "Esperando 06–09 NY"
+
+var line  entryLine = na
+var line  stopLine  = na
+var line  tpLine    = na
+var label sigLabel  = na
+
+// ——— New day ———
+if newDay
+    rangeHi := na
+    rangeLo := na
+    open9   := na
+    phase := 0
+    bias  := 0
+    sweepExtreme := na
+    breakerLevel := na
+    breakerBar   := na
+    entryPx := na
+    stopPx  := na
+    tpPx    := na
+    qtyMnq  := 0
+    tradesToday := 0
+    dayNetNote  := 0.0
+    statusTxt := "Nuevo día · acumulando vela 6"
+    box.delete(rangeBox)
+    rangeBox := na
+    line.delete(hiGuide)
+    line.delete(loGuide)
+    line.delete(openGuide)
+    hiGuide := na
+    loGuide := na
+    openGuide := na
+    line.delete(entryLine)
+    line.delete(stopLine)
+    line.delete(tpLine)
+    label.delete(sigLabel)
+    entryLine := na
+    stopLine  := na
+    tpLine    := na
+    sigLabel  := na
+
+bool secondAllowed = tradesToday == 1 and markBeInput
+bool canSignal = tradesToday == 0 or secondAllowed
+bool haltFlat  = time_close >= flatTs
+bool haltDll   = dayNetNote <= -personalDllInput
+bool haltCap   = dayNetNote >= profitCapInput
+
+bool signalFire = false
+bool blockFire  = false
+
+// ——— Build range + lock at 09:00 ———
+if barstate.isconfirmed and weekdayOk
+    if inRangeBuild
+        rangeHi := na(rangeHi) ? high : math.max(rangeHi, high)
+        rangeLo := na(rangeLo) ? low  : math.min(rangeLo, low)
+        if na(rangeBox)
+            rangeBox := box.new(
+                 left = time, top = rangeHi, right = time_close, bottom = rangeLo,
+                 xloc = xloc.bar_time, bgcolor = COL_RANGE, border_color = color.new(#2962FF, 40))
+        else
+            box.set_top(rangeBox, rangeHi)
+            box.set_bottom(rangeBox, rangeLo)
+            box.set_right(rangeBox, time_close)
+        statusTxt := "Acumulando Hi/Lo vela 6 (liquidez)"
+
+    bool windowJustOpened = inEntryWin and not inEntryWin[1]
+    if windowJustOpened and not na(rangeHi) and not na(rangeLo)
+        open9 := open
+        phase := 1
+        statusTxt := "Rango fijo · esperando manipulación 09–10:30"
+        line.delete(hiGuide)
+        line.delete(loGuide)
+        line.delete(openGuide)
+        hiGuide := line.new(time, rangeHi, time + MS_90M, rangeHi, xloc = xloc.bar_time, color = #2962FF, style = line.style_dashed)
+        loGuide := line.new(time, rangeLo, time + MS_90M, rangeLo, xloc = xloc.bar_time, color = #2962FF, style = line.style_dashed)
+        openGuide := line.new(time, open9, time + MS_90M, open9, xloc = xloc.bar_time, color = color.gray, style = line.style_dotted)
+        label.new(time, rangeHi, "Hi " + f_px(rangeHi), xloc = xloc.bar_time, style = label.style_label_down, color = color.new(#2962FF, 20), textcolor = color.white, size = size.small)
+        label.new(time, rangeLo, "Lo " + f_px(rangeLo), xloc = xloc.bar_time, style = label.style_label_up, color = color.new(#2962FF, 20), textcolor = color.white, size = size.small)
+
+// ——— Phase 1: sweep (manipulation, NOT entry) ———
+if barstate.isconfirmed and phase == 1 and inEntryWin and weekdayOk and chartOk and canSignal and not haltFlat and not haltDll and not haltCap
+    float hiThresh = rangeHi + sweepTicksInput * syminfo.mintick
+    float loThresh = rangeLo - sweepTicksInput * syminfo.mintick
+    bool sweptHi = high >= hiThresh
+    bool sweptLo = low  <= loThresh
+    if sweptHi and sweptLo
+        phase := 4
+        statusTxt := "Ambos extremos barridos · BLANK"
+        blockFire := true
+    else if sweptHi
+        bias := -1
+        sweepExtreme := high
+        breakerLevel := na
+        breakerBar := na
+        phase := 2
+        statusTxt := "Manip HIGH · SHORT: esperando breaker (toque swing low)"
+        if openFilterInput and not na(open9) and sweepExtreme < open9
+            statusTxt := statusTxt + " · open filter: manip bajo open (menos ideal)"
+    else if sweptLo
+        bias := 1
+        sweepExtreme := low
+        breakerLevel := na
+        breakerBar := na
+        phase := 2
+        statusTxt := "Manip LOW · LONG: esperando breaker (toque swing high)"
+        if openFilterInput and not na(open9) and sweepExtreme > open9
+            statusTxt := statusTxt + " · open filter: manip sobre open (menos ideal)"
+
+// ——— Phase 2: breaker by touch ———
+// LONG: último swing high tras manip → toque al alza
+// SHORT: último swing low tras manip → toque a la baja
+if barstate.isconfirmed and phase == 2 and inEntryWin and weekdayOk and chartOk and canSignal and not haltFlat
+    if bias == 1 and not na(pivotHi)
+        breakerLevel := pivotHi
+        breakerBar := bar_index - swingLenInput
+    if bias == -1 and not na(pivotLo)
+        breakerLevel := pivotLo
+        breakerBar := bar_index - swingLenInput
+
+    bool levelReady = not na(breakerLevel) and not na(breakerBar) and bar_index > breakerBar
+    bool touched =
+         levelReady and
+         (bias == 1 ? high >= breakerLevel : low <= breakerLevel)
+
+    if touched and not na(sweepExtreme)
+        float rawEntry = bias == 1 ? math.max(close, breakerLevel) : math.min(close, breakerLevel)
+        entryPx := math.round_to_mintick(rawEntry)
+        stopPx  := math.round_to_mintick(
+             bias == 1 ?
+             sweepExtreme - slBufferTicksInput * syminfo.mintick :
+             sweepExtreme + slBufferTicksInput * syminfo.mintick)
+        float dist = math.abs(entryPx - stopPx)
+        if dist < syminfo.mintick
+            phase := 4
+            statusTxt := "Distancia SL inválida · BLANK"
+            blockFire := true
+        else
+            qtyMnq := f_qty(dist)
+            if qtyMnq <= 0
+                phase := 4
+                statusTxt := "SL demasiado ancho para riesgo $" + str.tostring(riskUsdInput) + " · BLANK"
+                blockFire := true
+            else
+                tpPx := math.round_to_mintick(entryPx + bias * dist)
+                phase := 3
+                tradesToday := tradesToday + 1
+                signalFire := true
+                statusTxt := (bias == 1 ? "LONG" : "SHORT") + " · EJECUCIÓN MANUAL Tradovate"
+                line.delete(entryLine)
+                line.delete(stopLine)
+                line.delete(tpLine)
+                label.delete(sigLabel)
+                entryLine := na
+                stopLine  := na
+                tpLine    := na
+                sigLabel  := na
+                color sideCol = bias == 1 ? COL_LONG : COL_SHORT
+                entryLine := line.new(time_close, entryPx, time_close + MS_90M, entryPx, xloc = xloc.bar_time, color = COL_ENTRY, width = 2)
+                stopLine  := line.new(time_close, stopPx,  time_close + MS_90M, stopPx,  xloc = xloc.bar_time, color = COL_SL, width = 2)
+                tpLine    := line.new(time_close, tpPx,    time_close + MS_90M, tpPx,    xloc = xloc.bar_time, color = COL_TP, width = 2)
+                sigLabel  := label.new(
+                     time_close, entryPx,
+                     (bias == 1 ? "▲ LONG" : "▼ SHORT") + " · " + str.tostring(qtyMnq) + " MNQ\n" +
+                     "Entrada " + f_px(entryPx) + "\n" +
+                     "SL " + f_px(stopPx) + "\n" +
+                     "TP 1R " + f_px(tpPx) + "\n" +
+                     "MANUAL · Tradovate",
+                     xloc = xloc.bar_time,
+                     style = bias == 1 ? label.style_label_up : label.style_label_down,
+                     color = color.new(sideCol, 5),
+                     textcolor = color.white,
+                     size = size.normal)
+
+// ——— Window close without signal ———
+if barstate.isconfirmed and (phase == 1 or phase == 2) and not inEntryWin and inEntryWin[1]
+    phase := 4
+    statusTxt := "10:30 · sin breaker · BLANK"
+    blockFire := true
+
+// Extend level lines while signal is live
+if phase == 3 and not na(entryLine)
+    line.set_x2(entryLine, time_close + 30 * 60 * 1000)
+    line.set_x2(stopLine, time_close + 30 * 60 * 1000)
+    line.set_x2(tpLine, time_close + 30 * 60 * 1000)
+
+// ——— Visuals ———
+bgcolor(inRangeBuild ? color.new(#2962FF, 94) : inEntryWin ? color.new(#FFEB3B, 94) : na)
+
+plot(breakerLevel, "Breaker", color = color.new(color.fuchsia, phase == 2 ? 0 : 100), style = plot.style_linebr, linewidth = 1)
+plotshape(signalFire and bias == 1,  title = "LONG",  style = shape.triangleup,   location = location.belowbar, color = COL_LONG,  size = size.small)
+plotshape(signalFire and bias == -1, title = "SHORT", style = shape.triangledown, location = location.abovebar, color = COL_SHORT, size = size.small)
+
+var table panel = table.new(position.top_right, 2, 8, bgcolor = color.new(#111111, 15), border_width = 1)
+if showPanelInput and barstate.islast
+    table.cell(panel, 0, 0, "WILL APEX", text_color = COL_ENTRY, text_size = size.small)
+    table.cell(panel, 1, 0, chartOk ? statusTxt : "⚠️ Pon chart MNQ 5m", text_color = color.white, text_size = size.tiny)
+    table.cell(panel, 0, 1, "Hi / Lo vela6", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 1, na(rangeHi) ? "—" : f_px(rangeHi) + " / " + f_px(rangeLo), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 2, "Open vela9", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 2, na(open9) ? "—" : f_px(open9), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 3, "Breaker", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 3, na(breakerLevel) ? "—" : f_px(breakerLevel), text_color = color.fuchsia, text_size = size.small)
+    table.cell(panel, 0, 4, "Entrada · MNQ", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 4, na(entryPx) ? "—" : f_px(entryPx) + " · " + str.tostring(qtyMnq), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 5, "SL · TP 1R", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 5, na(stopPx) ? "—" : f_px(stopPx) + " · " + f_px(tpPx), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 6, "Trades · BE2", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 6, str.tostring(tradesToday) + " · " + (markBeInput ? "ON" : "OFF"), text_color = color.white, text_size = size.small)
+    string shield =
+         haltDll ? "HALT −$280" :
+         haltCap ? "HALT +$750" :
+         haltFlat ? "FLAT" :
+         not canSignal ? "1 trade hecho" : "OK"
+    table.cell(panel, 0, 7, "Blindaje", text_color = color.gray, text_size = size.small)
+    table.cell(panel, 1, 7, shield, text_color = (haltDll or haltCap) ? COL_SL : COL_TP, text_size = size.small)
+
+// ——— Alerts ———
+if enableAlertsInput and signalFire
+    alert(
+         (bias == 1 ? "LONG" : "SHORT") + " Will Apex | " +
+         str.tostring(qtyMnq) + " MNQ | Entrada " + f_px(entryPx) +
+         " | SL " + f_px(stopPx) + " | TP 1R " + f_px(tpPx) +
+         " | MANUAL Tradovate",
+         alert.freq_once_per_bar_close)
+
+if enableAlertsInput and blockFire
+    alert("Will Apex · " + statusTxt, alert.freq_once_per_bar_close)
+
+alertcondition(signalFire, title = "Señal Will Apex", message = "Señal: revisa Entrada / SL / TP 1R en el chart · ejecución MANUAL")

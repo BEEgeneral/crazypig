@@ -1,0 +1,607 @@
+//@version=6
+indicator("Horus Apex · 50K · v6 PRUEBAS", shorttitle="Horus Apex", overlay=true, max_boxes_count=200, max_lines_count=300, max_labels_count=300)
+// Salida global de compilación: evita CE10246 incluso si no hay señal en las barras cargadas.
+plot(na, title="Horus Apex · compilación", display=display.none)
+// Review: 2026-09-12. Official sources and model limitations in REGLAS_Y_USO.md.
+// Visual decision aid only. No broker/account connection and no order submission.
+// Focused replacement for v5.7.1: full exit at 1R, no partials, no automatic BE.
+// Historical OHLC ordering is unknowable: conservative stress model, not certification.
+string NY = "America/New_York"
+string G1 = "1 · Modelo 5m"
+string G2 = "2 · Protección personal (no son reglas Apex)"
+string G3 = "3 · Cuenta PA50K intradía · sincronización manual"
+string G4 = "4 · Costes y horario"
+string G5 = "5 · Dibujo y alertas"
+runMode = input.string("Cuenta sincronizada", "Modo", options=["Cuenta sincronizada", "Estudio histórico"], group=G3)
+thresholdLocked = input.bool(false, "Umbral fijo en 50.100 $ confirmado en Apex", group=G3, tooltip="Activa solo si Apex confirma ese umbral. Permite conservarlo y actualizar únicamente el balance al preparar la sesión.")
+seedBalance = input.float(50000, "Balance REAL en ese momento ($)", group=G3)
+thresholdInput = input.float(48000, "Umbral REAL de liquidación, si aún es móvil ($)", group=G3)
+float seedThreshold = thresholdLocked ? 50100.0 : thresholdInput
+seedDayNet = input.float(0, "P&L neto realizado del día en ese momento ($)", group=G3)
+seedLosses = input.float(0, "Suma de pérdidas netas del día, en positivo ($)", minval=0, group=G3)
+seedTrades = input.int(0, "Entradas realizadas hoy antes de sincronizar", minval=0, group=G3)
+seedTier = input.int(1, "Nivel PA asignado por Apex hoy", minval=1, maxval=4, group=G3)
+accountMNQCap = input.int(3, "Máximo MNQ permitido confirmado en tu plataforma", minval=1, group=G3, tooltip="Campo manual: no se presupone equivalencia de contratos ni se vigilan otras posiciones.")
+snapshotConfirmed = input.bool(false, "Datos verificados; cuenta plana; sin otras posiciones", group=G3, tooltip="Necesario para señales en Cuenta sincronizada. Sin fecha obligatoria. Al aplicar ajustes, el balance se toma como actual, sin simular operaciones anteriores. Actualiza al preparar la sesión o tras ejecuciones distintas, operaciones externas o retiradas. Recrea las alertas.")
+manualPause = input.bool(false, "Pausa manual: bloquear nuevas señales", group=G3)
+string rangeSession = "0600-0900"
+entrySession = input.session("0900-1030", "Ventana de entradas NY", group=G1)
+pivotLen = input.int(1, "Barras a cada lado del swing", minval=1, maxval=5, group=G1)
+sweepTicks = input.int(2, "Penetración mínima fuera del rango (ticks)", minval=1, group=G1)
+slBuffer = input.int(4, "Buffer más allá de la extensión (ticks)", minval=1, group=G1)
+useRangeFilter = input.bool(true, "Filtro de amplitud / ATR diario confirmado", group=G1)
+minATR = input.float(0.15, "Rango mínimo / ATR diario", minval=0, group=G1)
+maxATR = input.float(0.90, "Rango máximo / ATR diario", minval=0.1, group=G1)
+tradeRisk = input.float(120, "Presupuesto máximo por entrada, con costes ($)", minval=1, maxval=280, group=G2)
+warningBuffer = input.float(100, "Aviso antes del límite Apex ($)", minval=25, maxval=500, group=G2)
+personalDLL = input.float(280, "Pérdida diaria máxima personal ($)", minval=1, maxval=280, group=G2)
+personalCap = input.int(3, "Máximo personal de MNQ", minval=1, maxval=3, group=G2)
+maxAttempts = input.int(2, "Máximo de entradas por sesión", minval=1, maxval=2, group=G2)
+retestEnabled = input.bool(true, "Esperar retorno a la línea de entrada", group=G1, tooltip="La señal arma la oportunidad. La entrada solo se confirma si una vela posterior vuelve a tocar la línea de referencia.")
+retestBars = input.int(6, "Velas máximas para el retorno", minval=1, maxval=18, group=G1, tooltip="Caducidad de la oportunidad pendiente; 6 velas son 30 minutos en 5m.")
+reserve = input.float(300, "Reserva sobre el umbral Apex ($)", minval=50, group=G2)
+executionReserve = input.float(20, "Reserva diaria para ejecución imprevista ($)", minval=0, group=G2)
+cushionFraction = input.float(0.10, "Fracción máxima del colchón por entrada", minval=0.01, maxval=0.25, group=G2)
+useProfitCap = input.bool(false, "Activar techo diario realizado + flotante", group=G2, tooltip="Desactivado hasta confirmar si los 750 son por día o por operación. Solo avisa y simula salida.")
+profitCap = input.float(750, "Techo diario opcional ($)", minval=1, group=G2)
+commissionRT = input.float(1.04, "Comisión MNQ round-turn ($/contrato)", minval=0, group=G4, tooltip="Tabla oficial Tradovate consultada 12/09/2026: 1,04. Comprueba tu extracto.")
+slipTicks = input.int(2, "Slippage adverso estimado por ejecución (ticks)", minval=0, group=G4)
+blackoutEnabled = input.bool(true, "Bloquear barras que se solapan con franjas NY", group=G4)
+flatHour = input.int(16, "Hora NY de salida preventiva", minval=0, maxval=16, group=G4)
+flatMinute = input.int(50, "Minuto de salida preventiva", minval=0, maxval=59, group=G4, tooltip="16:50 por defecto; señal al cierre de 16:45–16:50. Ajusta antes para festivos con cierre anticipado.")
+showZone = input.bool(true, "Zona dinámica desde barrida", group=G5)
+showRef = input.bool(true, "Extremo opuesto 06–09 como referencia", group=G5)
+enableAlerts = input.bool(true, "Alertas de señal y gestión manual", group=G5)
+
+
+// CrazyPig transport only. No orders, account credentials or rule changes.
+cpEnabled = input.bool(false, "Enviar estado a CrazyPig", group="6 · CrazyPig")
+cpKey = input.string("", "Clave del receptor CrazyPig", group="6 · CrazyPig", tooltip="Clave hexadecimal local; nunca la contraseña de TradingView ni del bróker. No publiques esta clave.")
+cpNumber(float value) =>
+    na(value) ? "null" : str.tostring(value, "#.########")
+
+// Session key uses calendar dates at noon, avoiding fixed-hour DST arithmetic.
+sessionKey(int t) =>
+    int y = year(t, NY)
+    int m = month(t, NY)
+    int d = dayofmonth(t, NY)
+    timestamp(NY, y, m, d + (hour(t, NY) >= 18 ? 1 : 0), 12, 0)
+tierDLL(int t) =>
+    t <= 2 ? 1000.0 : t == 3 ? 2000.0 : 3000.0
+nextTier(float b) =>
+    b >= 56000 ? 4 : b >= 53000 ? 3 : b >= 51500 ? 2 : 1
+cash(float n) =>
+    str.tostring(n, "#.00") + " $"
+px(float n) =>
+    str.tostring(n, format.mintick)
+
+bool syncMode = runMode == "Cuenta sincronizada"
+bool chartOK = timeframe.isminutes and timeframe.multiplier == 5 and chart.is_standard and syminfo.root == "MNQ"
+float tick = syminfo.mintick
+float pv = syminfo.pointvalue
+float slip = slipTicks * tick
+float atrD = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead=barmerge.lookahead_on)
+float ph = ta.pivothigh(high, pivotLen, pivotLen)
+float pl = ta.pivotlow(low, pivotLen, pivotLen)
+bool inRange = not na(time(timeframe.period, rangeSession, NY))
+bool inEntry = not na(time(timeframe.period, entrySession, NY))
+// Fondo sutil durante 06:00–09:00 NY: confirma visualmente que el script está activo.
+bgcolor(inRange ? color.new(color.blue, 94) : na, title="Rango 06–09 NY")
+int dayKey = sessionKey(time)
+bool newDay = not na(dayKey[1]) and dayKey != dayKey[1]
+int nyY = year(time, NY)
+int nyM = month(time, NY)
+int nyD = dayofmonth(time, NY)
+int flatTS = timestamp(NY, nyY, nyM, nyD, flatHour, flatMinute)
+int b1a = timestamp(NY, nyY, nyM, nyD, 9, 28)
+int b1b = timestamp(NY, nyY, nyM, nyD, 9, 33)
+int b2a = timestamp(NY, nyY, nyM, nyD, 9, 58)
+int b2b = timestamp(NY, nyY, nyM, nyD, 10, 3)
+bool blackout = blackoutEnabled and ((time < b1b and time_close > b1a) or (time < b2b and time_close > b2a))
+bool weekdayOK = dayofweek(time, NY) >= dayofweek.monday and dayofweek(time, NY) <= dayofweek.friday
+bool seedValid = (seedThreshold >= 48000 and seedThreshold <= 50100 and seedBalance > seedThreshold and seedBalance - seedThreshold <= 2000.01) or (seedThreshold == 50100 and seedBalance > 50100)
+bool configOK = maxATR >= minATR and flatHour * 60 + flatMinute < 16 * 60 + 59 and seedLosses >= math.max(-seedDayNet, 0)
+
+var int accountStartBar = na
+var bool initialized = false
+var float balance = na
+var float threshold = na
+var float dayStartBalance = na
+var float dayNet = 0
+var float lossSpent = 0
+var int attempts = 0
+var int tier = 1
+var bool halted = false
+var bool modelBreached = false
+var string riskReason = ""
+// st: 0 range building, 1 waiting sweep, 2 zone/swing, 3 simulated trade, 4 finished.
+var int st = 0
+var float rangeHi = na
+var float rangeLo = na
+var int rangeStart = na
+var int rangeBars = 0
+var bool rangeReady = false
+var box rangeBox = na
+var box zone = na
+var float zoneHi = na
+var float zoneLo = na
+var int sweepBar = na
+var int extensionBar = na
+var int direction = 0
+var float extreme = na
+var float trigger = na
+var int triggerBar = na
+var line triggerLine = na
+var line entryLine = na
+var line stopLine = na
+var line tpLine = na
+var line refLine = na
+var float entry = na
+var float stop = na
+var float target = na
+var float initialRisk = na
+var float riskAtEntry = na
+var float entryBalance = na
+var int qty = 0
+var int entryBar = na
+var int tradeCount = 0
+var bool pendingRetest = false
+var float pendingEntry = na
+var float pendingStop = na
+var float pendingTarget = na
+var int pendingDirection = 0
+var int pendingStartBar = na
+var int pendingExpiresBar = na
+var int pendingQty = 0
+var float pendingRisk = na
+var int wins = 0
+var float sumNetR = 0
+var float grossWins = 0
+var float grossLoss = 0
+var int ambiguousBars = 0
+var string status = "Acumulando rango"
+
+bool entrySignal = false
+bool closedSignal = false
+bool blockedSignal = false
+bool entryAfterRetest = false
+bool enteredFromRetest = false
+float realizedNet = na
+float exitPrice = na
+string exitReason = ""
+
+if not initialized and (not syncMode or ((barstate.islastconfirmedhistory or barstate.isrealtime) and seedValid and configOK and snapshotConfirmed))
+    accountStartBar := bar_index
+    initialized := true
+    balance := syncMode ? seedBalance : 50000
+    threshold := syncMode ? seedThreshold : 48000
+    dayNet := syncMode ? seedDayNet : 0
+    dayStartBalance := balance - dayNet
+    lossSpent := syncMode ? seedLosses : 0
+    attempts := syncMode ? seedTrades : 0
+    tier := syncMode ? seedTier : 1
+
+bool accountUsable = initialized and (not syncMode or (snapshotConfirmed and bar_index > accountStartBar)) and chartOK and configOK and not manualPause
+if newDay and initialized and bar_index > accountStartBar
+    pendingRetest := false
+    pendingEntry := na
+    pendingStop := na
+    pendingTarget := na
+    pendingDirection := 0
+    pendingStartBar := na
+    pendingExpiresBar := na
+    pendingQty := 0
+    pendingRisk := na
+    if st == 3
+        halted := true
+        riskReason := "Falta cierre de sesión: modelo incompleto"
+    else if syncMode
+        halted := true
+        riskReason := "Nueva sesión: actualiza balance y verifica cuenta"
+    else
+        tier := nextTier(balance)
+        dayNet := 0
+        dayStartBalance := balance
+        lossSpent := 0
+        attempts := 0
+        halted := false
+        riskReason := ""
+
+float dll = tierDLL(tier)
+float personalFloor = initialized ? dayStartBalance - personalDLL + executionReserve : na
+float apexDLLFloor = initialized ? dayStartBalance - dll + executionReserve : na
+float reserveFloor = initialized ? threshold + reserve : na
+float protectiveFloor = initialized ? math.max(reserveFloor, math.max(personalFloor, apexDLLFloor)) : na
+if initialized and st != 3
+    bool noRoom = balance <= protectiveFloor or lossSpent >= personalDLL - executionReserve
+    if noRoom or attempts >= maxAttempts or (useProfitCap and dayNet >= profitCap)
+        halted := true
+        riskReason := noRoom ? "Presupuesto/reserva agotado" : attempts >= maxAttempts ? "Máximo de entradas" : "Techo personal de beneficio"
+
+// Range/zone state is committed only on closed bars. The preview box below can grow live.
+if barstate.isconfirmed
+    if inRange and not inRange[1] and st != 3
+        rangeHi := na
+        rangeLo := na
+        rangeStart := time
+        rangeBars := 0
+        rangeReady := false
+        st := 0
+        direction := 0
+        extreme := na
+        trigger := na
+        triggerBar := na
+        zoneHi := na
+        zoneLo := na
+        box.delete(rangeBox)
+        box.delete(zone)
+        line.delete(triggerLine)
+        rangeBox := na
+        zone := na
+        triggerLine := na
+        status := "Acumulando 06–09"
+    if inRange
+        rangeHi := na(rangeHi) ? high : math.max(rangeHi, high)
+        rangeLo := na(rangeLo) ? low : math.min(rangeLo, low)
+        rangeBars += 1
+        if not na(rangeStart)
+            if na(rangeBox)
+                rangeBox := box.new(rangeStart, rangeHi, time_close, rangeLo, xloc=xloc.bar_time, bgcolor=color.new(color.blue, 92), border_color=color.new(color.blue, 55))
+            else
+                box.set_top(rangeBox, rangeHi)
+                box.set_bottom(rangeBox, rangeLo)
+                box.set_right(rangeBox, time_close)
+    if not inRange and inRange[1] and st != 3
+        // 36 complete five-minute bars required for the default 3h reference.
+        rangeReady := not na(rangeHi) and not na(rangeLo) and rangeBars >= 36 and (not useRangeFilter or (not na(atrD) and rangeHi - rangeLo >= minATR * atrD and rangeHi - rangeLo <= maxATR * atrD))
+        st := rangeReady ? 1 : 4
+        status := rangeReady ? "Esperando barrida" : "Rango incompleto o fuera del filtro ATR"
+    if not na(rangeBox) and not inRange
+        box.set_right(rangeBox, time_close)
+
+    if st == 1 and rangeReady and inEntry and weekdayOK and chartOK
+        bool up = high >= rangeHi + sweepTicks * tick
+        bool dn = low <= rangeLo - sweepTicks * tick
+        if up and dn
+            st := 4
+            status := "Barrida de ambos lados: descartada"
+        else if up or dn
+            direction := up ? -1 : 1
+            extreme := up ? high : low
+            zoneHi := high
+            zoneLo := low
+            sweepBar := bar_index
+            extensionBar := bar_index
+            trigger := na
+            triggerBar := na
+            st := 2
+            status := "Zona activa: esperando estructura 5m"
+            if showZone
+                box.delete(zone)
+                zone := box.new(time, zoneHi, time_close, zoneLo, xloc=xloc.bar_time, bgcolor=color.new(color.orange, 90), border_color=color.orange)
+
+    // Una señal no ejecuta por sí sola: arma una oportunidad y espera un retorno.
+    // Se evalúa antes de buscar nuevas estructuras para mantener una única entrada viva.
+    if pendingRetest and st == 2
+        bool pendingExpired = bar_index > pendingExpiresBar or not inEntry or time_close >= flatTS
+        bool pendingStopHit = pendingDirection == 1 ? low <= pendingStop : high >= pendingStop
+        bool pendingTargetHit = pendingDirection == 1 ? high >= pendingTarget : low <= pendingTarget
+        bool pendingTouch = bar_index > pendingStartBar and (pendingDirection == 1 ? low <= pendingEntry : high >= pendingEntry)
+        if pendingExpired or pendingStopHit or pendingTargetHit
+            pendingRetest := false
+            blockedSignal := true
+            st := 4
+            status := pendingExpired ? "Retorno caducado · sin entrada" : "Nivel alcanzado antes del retorno · sin entrada"
+            line.delete(triggerLine)
+            triggerLine := na
+            if not na(zone)
+                box.set_text(zone, "OPORTUNIDAD CERRADA")
+                box.set_border_color(zone, color.gray)
+        else if pendingTouch
+            pendingRetest := false
+            enteredFromRetest := true
+            entryAfterRetest := true
+            direction := pendingDirection
+            qty := pendingQty
+            entry := pendingEntry
+            stop := pendingStop
+            initialRisk := math.abs(entry - stop)
+            target := pendingTarget
+            riskAtEntry := pendingRisk
+            entryBalance := balance
+            entryBar := bar_index
+            attempts += 1
+            st := 3
+            entrySignal := true
+            status := "Retorno confirmado · ejecución MANUAL"
+            line.delete(triggerLine)
+            triggerLine := na
+            entryLine := line.new(time_close, entry, time_close + 3600000, entry, xloc=xloc.bar_time, color=color.orange, width=2)
+            stopLine := line.new(time_close, stop, time_close + 3600000, stop, xloc=xloc.bar_time, color=color.red, width=2)
+            tpLine := line.new(time_close, target, time_close + 3600000, target, xloc=xloc.bar_time, color=color.green, width=2)
+            label.new(time_close, entry, "RETORNO · " + (direction == 1 ? "LONG" : "SHORT") + " · " + str.tostring(qty) + " MNQ\nEntrada " + px(entry) + "\nSL " + px(stop) + " · TP 1:1 " + px(target) + "\nRiesgo estimado " + cash(riskAtEntry), xloc=xloc.bar_time, style=direction == 1 ? label.style_label_up : label.style_label_down, color=color.new(color.blue, 15), textcolor=color.white)
+            if not na(zone)
+                box.set_text(zone, "RETORNO CONFIRMADO")
+                box.set_border_color(zone, direction == 1 ? color.green : color.red)
+
+    if st == 2 and not enteredFromRetest and not pendingRetest
+        zoneHi := math.max(zoneHi, high)
+        zoneLo := math.min(zoneLo, low)
+        bool extended = direction == -1 ? high > extreme : low < extreme
+        if extended
+            extreme := direction == -1 ? high : low
+            extensionBar := bar_index
+            trigger := na
+            triggerBar := na
+            line.delete(triggerLine)
+            triggerLine := na
+        if not na(zone)
+            box.set_top(zone, zoneHi)
+            box.set_bottom(zone, zoneLo)
+            box.set_right(zone, time_close)
+        // Test the existing confirmed swing BEFORE replacing it with a new candidate.
+        bool broken = not na(trigger) and bar_index > triggerBar and (direction == -1 ? close < trigger : close > trigger)
+        if broken
+            bool allowed = accountUsable and not halted and not modelBreached and inEntry and not blackout and weekdayOK and time_close < flatTS and attempts < maxAttempts
+            float fillEntry = math.round_to_mintick(close + direction * slip)
+            float candStop = direction == -1 ? extreme + slBuffer * tick : extreme - slBuffer * tick
+            float distance = direction * (fillEntry - candStop)
+            // Referencia técnica independiente de la cuenta. No activa órdenes ni alertas de entrada.
+            if distance >= tick
+                float technicalTP = math.round_to_mintick(fillEntry + direction * distance)
+                line.new(time_close, fillEntry, time_close + 1800000, fillEntry, xloc=xloc.bar_time, color=color.orange, style=line.style_dashed)
+                line.new(time_close, candStop, time_close + 1800000, candStop, xloc=xloc.bar_time, color=color.red, style=line.style_dashed)
+                line.new(time_close, technicalTP, time_close + 1800000, technicalTP, xloc=xloc.bar_time, color=color.green, style=line.style_dashed)
+                label.new(time_close, fillEntry, "Referencia técnica" + (retestEnabled ? " · falta retorno" : "") + (not accountUsable ? " · riesgo sin verificar" : " · pendiente de filtros"), xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 15), textcolor=color.white, size=size.tiny)
+            float unitRisk = (distance + slip) * pv + commissionRT
+            float cushion = initialized ? balance - threshold : 0
+            float dailyRoom = initialized ? math.max(0, math.min(personalDLL + dayNet, personalDLL - lossSpent) - executionReserve) : 0
+            float accountRoom = initialized ? math.max(0, balance - protectiveFloor) : 0
+            float budget = math.max(0, math.min(tradeRisk, math.min(dailyRoom, math.min(accountRoom, cushion * cushionFraction))))
+            int count = unitRisk > 0 ? int(math.floor(budget / unitRisk)) : 0
+            count := math.min(count, math.min(personalCap, accountMNQCap))
+            // Reserve remains intact even if price almost reaches 1R then returns to SL.
+            if initialized and count > 0
+                for q = 1 to 3
+                    if count > 0
+                        float nearTargetEquity = balance + distance * pv * count
+                        float stressedThreshold = math.min(50100, math.max(threshold, nearTargetEquity - 2000))
+                        if balance - unitRisk * count < stressedThreshold + reserve
+                            count -= 1
+            if allowed and count > 0 and distance >= tick and retestEnabled
+                pendingRetest := true
+                pendingEntry := fillEntry
+                pendingStop := math.round_to_mintick(candStop)
+                pendingTarget := math.round_to_mintick(fillEntry + direction * math.abs(fillEntry - pendingStop))
+                pendingDirection := direction
+                pendingStartBar := bar_index
+                pendingExpiresBar := bar_index + retestBars
+                pendingQty := count
+                pendingRisk := unitRisk * count
+                status := "Señal armada · esperando retorno a línea"
+                line.delete(triggerLine)
+                triggerLine := line.new(time_close, pendingEntry, time_close + 1800000, pendingEntry, xloc=xloc.bar_time, color=color.yellow, style=line.style_dashed, width=2)
+                if not na(zone)
+                    box.set_text(zone, "ESPERA RETORNO")
+                    box.set_border_color(zone, color.yellow)
+            else if allowed and count > 0 and distance >= tick
+                qty := count
+                entry := fillEntry
+                stop := math.round_to_mintick(candStop)
+                initialRisk := math.abs(entry - stop)
+                target := math.round_to_mintick(entry + direction * initialRisk)
+                riskAtEntry := unitRisk * qty
+                entryBalance := balance
+                entryBar := bar_index
+                attempts += 1
+                st := 3
+                entrySignal := true
+                status := "Señal confirmada · ejecución MANUAL"
+                line.delete(triggerLine)
+                triggerLine := na
+                entryLine := line.new(time_close, entry, time_close + 3600000, entry, xloc=xloc.bar_time, color=color.orange, width=2)
+                stopLine := line.new(time_close, stop, time_close + 3600000, stop, xloc=xloc.bar_time, color=color.red, width=2)
+                tpLine := line.new(time_close, target, time_close + 3600000, target, xloc=xloc.bar_time, color=color.green, width=2)
+                if showRef
+                    float ref = direction == 1 ? rangeHi : rangeLo
+                    refLine := line.new(time_close, ref, time_close + 3600000, ref, xloc=xloc.bar_time, color=color.gray, style=line.style_dotted)
+                    label.new(time_close, ref, "Extremo 06–09 · opcional", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.gray, 85), textcolor=color.gray)
+                label.new(time_close, entry, (direction == 1 ? "LONG" : "SHORT") + " · " + str.tostring(qty) + " MNQ\nReferencia " + px(entry) + "\nSL " + px(stop) + " · TP 1:1 " + px(target) + "\nRiesgo estimado " + cash(riskAtEntry), xloc=xloc.bar_time, style=direction == 1 ? label.style_label_up : label.style_label_down, color=color.new(color.blue, 15), textcolor=color.white)
+                if not na(zone)
+                    box.set_text(zone, "GIRO CONFIRMADO")
+                    box.set_border_color(zone, direction == 1 ? color.green : color.red)
+            else
+                blockedSignal := true
+                status := blackout ? "Confirmación en blackout: descartada" : not accountUsable ? "Cuenta sin verificar o gráfico no válido" : halted ? riskReason : "SL no cabe en presupuesto o reserva"
+                st := 4
+                line.delete(triggerLine)
+                triggerLine := na
+                if not na(zone)
+                    box.set_text(zone, "SIN ENTRADA · " + status)
+                    box.set_border_color(zone, color.gray)
+        else
+            float candidate = direction == -1 ? pl : ph
+            if not na(candidate) and bar_index - pivotLen > extensionBar
+                bool ahead = direction == -1 ? candidate < close : candidate > close
+                bool better = na(trigger) or (direction == -1 ? candidate > trigger : candidate < trigger)
+                if ahead and better
+                    trigger := candidate
+                    triggerBar := bar_index
+                    line.delete(triggerLine)
+                    triggerLine := line.new(time_close, trigger, time_close + 1800000, trigger, xloc=xloc.bar_time, color=color.orange, style=line.style_dotted)
+
+    if not inEntry and (st == 1 or st == 2) and not inRange
+        st := 4
+        status := "Ventana cerrada · cancelar pendientes"
+        line.delete(triggerLine)
+        triggerLine := na
+        if not na(zone)
+            box.set_text(zone, "ZONA CADUCADA")
+            box.set_border_color(zone, color.gray)
+
+// Intrabar preview never confirms a setup. Returned extrema can overlap the fixed range.
+if st == 2 and not barstate.isconfirmed and not na(zone)
+    box.set_top(zone, math.max(zoneHi, high))
+    box.set_bottom(zone, math.min(zoneLo, low))
+    box.set_right(zone, time_close)
+
+// Current-bar risk projections: stop/target cap exposure; prices beyond an exit are not held.
+bool managing = st == 3 and bar_index > entryBar
+float markEquity = initialized ? balance : na
+float stressThreshold = threshold
+float stopEquity = na
+float liveFloor = protectiveFloor
+bool riskAlert = false
+bool exitTimeAlert = managing and time_close >= flatTS
+if managing
+    float favorablePrice = direction == 1 ? math.min(high, target) : math.max(low, target)
+    float favorableEquity = entryBalance + direction * (favorablePrice - entry) * pv * qty
+    stressThreshold := math.min(50100, math.max(threshold, favorableEquity - 2000))
+    liveFloor := math.max(stressThreshold + reserve, math.max(personalFloor, apexDLLFloor))
+    markEquity := entryBalance + direction * (close - entry) * pv * qty - commissionRT * qty
+    float stopFill = stop - direction * slip
+    stopEquity := entryBalance + direction * (stopFill - entry) * pv * qty - commissionRT * qty
+    riskAlert := stopEquity < liveFloor or markEquity <= liveFloor
+    if barstate.isconfirmed
+        threshold := stressThreshold
+        float riskPrice = entry + direction * (liveFloor - entryBalance + commissionRT * qty) / (pv * qty)
+        float protectiveStop = direction == 1 ? math.max(stop, riskPrice) : math.min(stop, riskPrice)
+        bool hitStop = direction == 1 ? low <= protectiveStop : high >= protectiveStop
+        bool hitTarget = direction == 1 ? high >= target : low <= target
+        bool capHit = useProfitCap and dayNet + direction * (favorablePrice - entry) * pv * qty - commissionRT * qty >= profitCap
+        if hitStop and hitTarget
+            ambiguousBars += 1
+        // Adverse first when both exits are possible: conservative OHLC scenario.
+        if hitStop
+            float gapPrice = direction == 1 ? math.min(open, protectiveStop) : math.max(open, protectiveStop)
+            exitPrice := gapPrice - direction * slip
+            exitReason := protectiveStop != stop ? "Salida preventiva simulada · revisar plataforma" : "SL"
+            if protectiveStop != stop
+                halted := true
+                riskReason := "Reserva de riesgo alcanzada"
+        else if capHit
+            exitPrice := entry + direction * (profitCap - dayNet + commissionRT * qty) / (pv * qty) - direction * slip
+            exitReason := "Techo diario personal"
+            halted := true
+            riskReason := exitReason
+        else if hitTarget
+            // Manual TP limit model: fill at target, no fictitious favorable slippage.
+            exitPrice := target
+            exitReason := "TP 1:1"
+        else if time_close >= flatTS
+            exitPrice := close - direction * slip
+            exitReason := "Salida preventiva por horario"
+        if not na(exitPrice)
+            realizedNet := direction * (exitPrice - entry) * pv * qty - commissionRT * qty
+            balance := entryBalance + realizedNet
+            dayNet += realizedNet
+            lossSpent += math.max(-realizedNet, 0)
+            threshold := math.min(50100, math.max(threshold, balance - 2000))
+            tradeCount += 1
+            sumNetR += realizedNet / (initialRisk * pv * qty)
+            if realizedNet > 0
+                wins += 1
+                grossWins += realizedNet
+            else
+                grossLoss += -realizedNet
+            if balance <= threshold
+                modelBreached := true
+                halted := true
+                riskReason := "Escenario simulado toca umbral; verificar cuenta"
+            closedSignal := true
+            st := 4
+            status := exitReason + " · " + cash(realizedNet)
+            label.new(time_close, exitPrice, status, xloc=xloc.bar_time, style=label.style_label_left, color=realizedNet > 0 ? color.green : color.red, textcolor=color.white)
+            line.set_x2(entryLine, time_close)
+            line.set_x2(stopLine, time_close)
+            line.set_x2(tpLine, time_close)
+            // A second attempt requires a fresh sweep on a later bar, no reused trigger.
+            if attempts < maxAttempts and not halted and not modelBreached and inEntry and time_close < flatTS
+                st := 1
+                trigger := na
+                triggerBar := na
+                zoneHi := na
+                zoneLo := na
+                extreme := na
+                direction := 0
+
+// Aviso intradía con equity flotante y suelo protector estimado.
+bool warningAlert = initialized and st == 3 and (riskAlert or markEquity <= liveFloor + warningBuffer)
+bgcolor(warningAlert ? (riskAlert ? color.new(color.red, 82) : color.new(color.yellow, 84)) : na, title="Aviso de riesgo Apex")
+var label warningLabel = na
+if barstate.islast
+    label.delete(warningLabel)
+    warningLabel := warningAlert ? label.new(bar_index, high, riskAlert ? "⚠ RIESGO: revisar/cerrar" : "AVISO: colchón reducido", style=label.style_label_down, color=riskAlert ? color.red : color.orange, textcolor=color.white) : na
+
+if st == 3
+    line.set_x2(entryLine, time_close + 1800000)
+    line.set_x2(stopLine, time_close + 1800000)
+    line.set_x2(tpLine, time_close + 1800000)
+
+// One risk alert per bar, including realtime ticks; no order side effects.
+varip bool riskSent = false
+varip bool timeSent = false
+if barstate.isnew
+    riskSent := false
+    timeSent := false
+if enableAlerts and not cpEnabled and barstate.isrealtime
+    if riskAlert and not riskSent
+        alert("RIESGO PA50K: el SL previsto invade la reserva. Revisa y actúa MANUALMENTE en la plataforma. El indicador no conoce tus fills reales.", alert.freq_all)
+        riskSent := true
+    if exitTimeAlert and not timeSent
+        alert("HORARIO: prepara el cierre MANUAL y cancela pendientes antes del límite configurado; comprueba cierre anticipado en festivos.", alert.freq_all)
+        timeSent := true
+if enableAlerts and not cpEnabled and entrySignal
+    alert((entryAfterRetest ? "RETORNO CONFIRMADO · " : "") + (direction == 1 ? "LONG" : "SHORT") + " 5m · " + str.tostring(qty) + " MNQ · referencia " + px(entry) + " · SL " + px(stop) + " · TP 1:1 " + px(target) + " · EJECUCIÓN MANUAL", alert.freq_once_per_bar_close)
+if enableAlerts and not cpEnabled and closedSignal
+    alert("Salida del MODELO: " + status + ". Comprueba la posición real en tu plataforma.", alert.freq_once_per_bar_close)
+if enableAlerts and not cpEnabled and blockedSignal
+    alert("Sin entrada: " + status, alert.freq_once_per_bar_close)
+plotshape(entrySignal and direction == 1, "LONG confirmado", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(entrySignal and direction == -1, "SHORT confirmado", shape.triangledown, location.abovebar, color.red, size=size.small)
+alertcondition(entrySignal, "Entrada confirmada", "Señal de referencia: revisar entrada, SL, TP y contratos; ejecución manual.")
+alertcondition(riskAlert, "Reserva de riesgo comprometida", "El SL previsto invade la reserva de cuenta. Revisar plataforma.")
+alertcondition(warningAlert, "Aviso de colchón Apex", "La equity flotante se acerca al suelo protector estimado. Revisar y cerrar manualmente si procede.")
+plot(closedSignal ? realizedNet : na, "P&L neto simulado", display=display.data_window)
+plot(initialized ? balance : na, "Balance simulado", display=display.data_window)
+plot(initialized ? threshold : na, "Umbral simulado", display=display.data_window)
+
+var table panel = table.new(position.bottom_left, 2, 8, bgcolor=color.new(color.black, 18), frame_color=color.new(color.gray, 35), frame_width=1, border_color=color.new(color.gray, 65), border_width=1)
+if barstate.islast
+    string banner = not chartOK ? "Usa MNQ · velas normales · 5m" : not configOK ? "Revisa configuración" : syncMode and not seedValid ? "Balance/umbral no válidos" : syncMode and not snapshotConfirmed ? "Introduce y verifica datos Apex" : manualPause ? "Pausa manual" : halted ? riskReason : status
+    float equityShown = st == 3 ? markEquity : balance
+    float thresholdShown = st == 3 ? stressThreshold : threshold
+    float room = initialized ? equityShown - thresholdShown : na
+    table.cell(panel, 0, 0, "HORUS APEX", bgcolor=color.black, text_color=color.orange)
+    table.cell(panel, 1, 0, banner, bgcolor=color.black, text_color=color.white)
+    table.cell(panel, 0, 1, "Entrada / contratos", text_color=color.white)
+    table.cell(panel, 1, 1, na(entry) ? "Sin entrada" : px(entry) + " / " + str.tostring(qty) + " MNQ", text_color=color.white)
+    table.cell(panel, 0, 2, "SL / TP 1:1", text_color=color.white)
+    table.cell(panel, 1, 2, na(stop) ? "—" : px(stop) + " / " + px(target), text_color=color.white)
+    table.cell(panel, 0, 3, "Riesgo / colchón", text_color=color.white)
+    table.cell(panel, 1, 3, initialized ? cash(riskAtEntry) + " / " + cash(room) : "Sin datos", text_color=color.white)
+    table.cell(panel, 0, 4, "P&L día / límite", text_color=color.white)
+    table.cell(panel, 1, 4, cash(dayNet) + " / " + cash(personalDLL), text_color=color.white)
+    table.cell(panel, 0, 5, "Intentos / DLL", text_color=color.white)
+    table.cell(panel, 1, 5, str.tostring(attempts) + "/" + str.tostring(maxAttempts) + " / " + cash(dll), text_color=color.white)
+    table.cell(panel, 0, 6, "Aviso", text_color=color.white)
+    table.cell(panel, 1, 6, warningAlert ? (riskAlert ? "RIESGO · revisar/cerrar" : "CUSHION BAJO") : not initialized ? "Riesgo sin verificar" : "Modelo estimado", text_color=warningAlert ? color.red : color.white)
+    // Margen transparente para dejar la tabla encima del logo de TradingView.
+    table.cell(panel, 0, 7, "", bgcolor=color.new(color.black, 100))
+    table.cell(panel, 1, 7, "", bgcolor=color.new(color.black, 100))
+
+
+// A bar-close snapshot is not a tick feed or a broker fill confirmation.
+// Recreate the TradingView alert after changing this script or its inputs.
+if cpEnabled and str.length(cpKey) == 64 and chartOK and barstate.isrealtime and barstate.isconfirmed
+    string cpStage = closedSignal ? "closed" : st == 3 ? (direction == 1 ? "long" : "short") : pendingRetest ? "retest" : st == 2 ? (na(trigger) ? "sweep" : "structure") : st <= 1 ? "range" : "flat"
+    int cpDirection = pendingRetest ? pendingDirection : direction
+    float cpEntry = pendingRetest ? pendingEntry : entry
+    float cpStop = pendingRetest ? pendingStop : stop
+    float cpTarget = pendingRetest ? pendingTarget : target
+    int cpQty = pendingRetest ? pendingQty : st == 3 or closedSignal ? qty : 0
+    string cpPayload = "{\"version\":1,\"key\":\"" + cpKey + "\",\"id\":\"" + syminfo.tickerid + ":" + str.tostring(time_close) + "\",\"symbol\":\"" + syminfo.tickerid + "\",\"time\":" + str.tostring(timenow)
+    cpPayload += ",\"stage\":\"" + cpStage + "\",\"direction\":" + str.tostring(cpDirection) + ",\"maxContracts\":" + str.tostring(cpQty)
+    cpPayload += ",\"price\":" + cpNumber(close) + ",\"rangeHigh\":" + cpNumber(rangeHi) + ",\"rangeLow\":" + cpNumber(rangeLo)
+    cpPayload += ",\"entry\":" + cpNumber(cpEntry) + ",\"stop\":" + cpNumber(cpStop) + ",\"target\":" + cpNumber(cpTarget) + "}"
+    alert(cpPayload, alert.freq_once_per_bar_close)
