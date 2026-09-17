@@ -220,7 +220,7 @@ function frame(now:number){
   if(valley&&valley.fartEvent!==fartSeen){fartSeen=valley.fartEvent;toast('El cerdo tiene sus propias costumbres…');chime(110);}
   if(indicator.stage!==lastIndicatorStage){
    flashQuest(indicator.stage,indicator.direction);
-   if(indicator.stage==='tp'||indicator.stage==='sl'){$('#race-result').hidden=false;$('#result-title').textContent=indicator.stage==='tp'?'¡Botín del día!':'Herida mortal.';$('#result-detail').textContent=`${indicator.stage==='tp'?LEXICON.tp:LEXICON.sl}. Solo ensayo. El tesoro oficial no cambia.`;$('#pause').hidden=true;clearMovement();chime(indicator.stage==='tp'?740:260);}
+   if(indicator.stage==='tp'||indicator.stage==='sl'){$('#race-result').hidden=false;$('#result-title').textContent=indicator.stage==='tp'?'¡Botín del día!':'Herida mortal.';$('#result-detail').textContent='Solo ensayo. El tesoro oficial no cambia.';$('#pause').hidden=true;clearMovement();chime(indicator.stage==='tp'?740:260);}
    lastIndicatorStage=indicator.stage;
   }
   renderIndicator(indicator);

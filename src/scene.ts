@@ -223,7 +223,7 @@ export class ValleyScene {
     this.lastOffset=z;
     const pigZ=racing?z+this.track.lurchZ:0;
     this.pig.position.set(0,this.track.hopY,pigZ);
-    this.pig.rotation.x=0;this.pig.rotation.z=this.track.offerT*.25*(run?.side??0);
+    this.pig.rotation.set(0,0,racing?this.track.offerT*.25*(run?.side??0):0);
     this.pig.scale.setScalar(racing?1.55:2.25);
     this.actor.pose(this.clock,active||this.track.action==='crash',this.reduced,indicator?.stage??'flat',this.track.action,this.track.offerT);
     if(indicator){

@@ -127,6 +127,13 @@ export class StageTrack{
     const mapped=chartBeat(stage,direction);
     const changed=stage!==this.stage;
     this.stage=stage;this.beat=mapped.beat;
+    if(!active){
+      this.action='idle';this.shake=0;this.lurchZ=0;this.hopY=0;this.offerT=0;this.impactT=0;
+      this.hideAll();
+      this.coins.forEach(c=>c.visible=false);this.stars.forEach(s=>s.visible=false);
+      this.shards.forEach(s=>{s.life=0;s.mesh.visible=false;});
+      return;
+    }
     const highZ=priceToGround(frame.high,frame),lowZ=priceToGround(frame.low,frame);
     const wick=pigZ-this.lastZ;this.lastZ=pigZ;
     if(Math.abs(wick)>0.18&&active){this.lurchZ+=wick*1.8;this.shake=Math.max(this.shake,.22);this.hopY=.12;}
